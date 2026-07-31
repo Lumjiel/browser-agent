@@ -65,13 +65,25 @@
 
   async function apiPost(path, data) {
     try {
-      await fetch(API_BASE + path, {
+      const resp = await fetch(API_BASE + path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
+      if (!resp.ok) {
+        origError(`[BrowserAgent] ${path} → HTTP ${resp.status}`);
+      }
     } catch (e) {
-      // silent fail for logging
+      origError(`[BrowserAgent] ${path} fetch failed: ${e.message}`);
+      // Fallback to XMLHttpRequest
+      try {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", API_BASE + path, true);
+        xhr.setRequestHeader("Content-Type", "application/json");
+        xhr.send(JSON.stringify(data));
+      } catch (e2) {
+        origError(`[BrowserAgent] ${path} xhr also failed: ${e2.message}`);
+      }
     }
   }
 

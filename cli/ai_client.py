@@ -21,7 +21,7 @@ import urllib.request
 
 # ========== 配置 ==========
 API = "http://127.0.0.1:8123/api/browser"
-AGENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "agents.yaml")
+AGENTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "config", "agents.yaml")
 
 # ========== 加载平台配置 ==========
 
