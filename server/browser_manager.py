@@ -68,10 +68,15 @@ def find_tab_on_domain(domain):
     with browser_lock:
         best_tab = None
         best_time = 0
+        now = time.time()
         for tid, info in browser_tabs.items():
-            if domain in info.get("url", "") and info.get("updated_at", 0) > best_time:
+            # 跳过超过 60 秒没有心跳的 tab（可能已关闭或脚本崩溃）
+            updated_at = info.get("updated_at", 0)
+            if now - updated_at > 60:
+                continue
+            if domain in info.get("url", "") and updated_at > best_time:
                 best_tab = tid
-                best_time = info["updated_at"]
+                best_time = updated_at
         return best_tab
 
 

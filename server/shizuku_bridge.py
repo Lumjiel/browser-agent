@@ -37,9 +37,10 @@ from browser_manager import (
     send_cmd, wait_for_cmd_result, find_tab_on_domain, find_most_recent_tab,
     ping_tab, launch_browser_via_adb, navigate_and_wait, ensure_on_page,
     add_result, add_log, get_results, get_logs, get_tabs_state,
-    result_waiters, result_cache, cmd_id_counter, browser_lock,
+    result_waiters, result_cache, browser_lock,
     MAX_RESULTS, MAX_LOGS
 )
+import browser_manager
 from shell_relay import validate_and_execute, ALLOWED_PREFIXES
 
 # ========== 配置 ==========
@@ -164,8 +165,8 @@ class ShizukuHandler(BaseHTTPRequestHandler):
             tab_id = data.get("tabId", "default")
             timeout = data.get("timeout", 30)
             with browser_lock:
-                cmd_id_counter += 1
-                cmd_id = cmd_id_counter
+                browser_manager.cmd_id_counter += 1
+                cmd_id = browser_manager.cmd_id_counter
                 cmd = {"id": cmd_id, "action": action, "tabId": tab_id}
                 for k, v in data.items():
                     if k not in ("action", "tabId"):
@@ -194,15 +195,15 @@ class ShizukuHandler(BaseHTTPRequestHandler):
                 return self._send_json({"error": "缺少action"}, 400)
             tab_id = data.get("tabId", "default")
             with browser_lock:
-                cmd_id_counter += 1
-                cmd = {"id": cmd_id_counter, "action": action, "tabId": tab_id}
+                browser_manager.cmd_id_counter += 1
+                cmd = {"id": browser_manager.cmd_id_counter, "action": action, "tabId": tab_id}
                 for k, v in data.items():
                     if k not in ("action", "tabId"):
                         cmd[k] = v
                 if tab_id not in browser_commands:
                     browser_commands[tab_id] = []
                 browser_commands[tab_id].append(cmd)
-            self._send_json({"ok": True, "cmdId": cmd_id_counter, "action": action})
+            self._send_json({"ok": True, "cmdId": browser_manager.cmd_id_counter, "action": action})
             return
 
         if parsed_path == "/api/browser/navigate":

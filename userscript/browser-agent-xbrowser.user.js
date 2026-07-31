@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Browser Agent (XBrowser 适配版)
-// @namespace    https://github.com/Lumjiel/browser-agent
+// @namespace    https://github.com/npezarro/claude-browser-agent
 // @version      2.0.0
 // @description  通用浏览器代理 - 轮询获取命令，执行 DOM 操作。适配 XBrowser（用 fetch 替代 GM_xmlhttpRequest）
-// @author       npezarro (adapted for XBrowser), Lumjiel (localized)
+// @author       npezarro (adapted for XBrowser)
 // @match        *://*/*
 // @grant        none
 // @run-at       document-idle
@@ -65,25 +65,13 @@
 
   async function apiPost(path, data) {
     try {
-      const resp = await fetch(API_BASE + path, {
+      await fetch(API_BASE + path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data),
       });
-      if (!resp.ok) {
-        origError(`[BrowserAgent] ${path} → HTTP ${resp.status}`);
-      }
     } catch (e) {
-      origError(`[BrowserAgent] ${path} fetch failed: ${e.message}`);
-      // Fallback to XMLHttpRequest
-      try {
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", API_BASE + path, true);
-        xhr.setRequestHeader("Content-Type", "application/json");
-        xhr.send(JSON.stringify(data));
-      } catch (e2) {
-        origError(`[BrowserAgent] ${path} xhr also failed: ${e2.message}`);
-      }
+      // silent fail for logging
     }
   }
 
