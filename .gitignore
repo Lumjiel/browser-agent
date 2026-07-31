@@ -29,6 +29,7 @@ coverage.xml
 
 # ===== 配置（可能包含密钥） =====
 config/config.json
+config/config.local.json
 
 # ===== IDE =====
 .vscode/

@@ -33,7 +33,7 @@ test:
 # 代码检查
 lint:
 	@echo "🔍 代码检查..."
-	@cd server && python3 -m flake8 shizuku_bridge.py --max-line-length=120 || true
+	@cd server && python3 -m flake8 shizuku_bridge.py browser_manager.py shell_relay.py config.py --max-line-length=120 || true
 
 # 安装开发依赖
 install:

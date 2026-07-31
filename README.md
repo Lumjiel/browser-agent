@@ -57,7 +57,10 @@ browser-agent/
 ├── .github/
 │   └── workflows/ci.yml       ← CI 自动化
 ├── server/
-│   ├── shizuku_bridge.py       ← Python 桥接服务端（核心）
+│   ├── shizuku_bridge.py       ← 主入口（HTTP 路由）
+│   ├── browser_manager.py      ← Tab 管理 + 导航逻辑
+│   ├── shell_relay.py          ← Shell 命令中继 + 白名单
+│   ├── config.py               ← 配置加载
 │   ├── shizuku_bridge.service  ← systemd 服务文件
 │   └── requirements.txt        ← 开发依赖
 ├── userscript/
