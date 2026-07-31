@@ -6,7 +6,8 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │                         控制端 (Pi / CLI)                        │
 │  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
-│  │ browser_cli  │  │  ai_ask.py   │  │   future clients     │  │
+│  │ ai_client.py │  │ browser_cli  │  │   future clients     │  │
+│  │ (AI 问答)    │  │ (浏览器控制)  │  │                      │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘  │
 └─────────┼─────────────────┼─────────────────────┼──────────────┘
           │                 │                     │
@@ -38,14 +39,10 @@
 │  │ (轮询执行 DOM 操作)│  │           │  │  ├── input tap    │  │
 │  └───────────────────┘  │           │  │  ├── input swipe  │  │
 │  ┌───────────────────┐  │           │  │  ├── input text   │  │
-│  │ ai_bridge         │  │           │  │  ├── screencap    │  │
-│  │ (AI 问答桥接)      │  │           │  │  └── uiautomator  │  │
+│  │ console           │  │           │  │  ├── screencap    │  │
+│  │ (ADB Shell 控制台) │  │           │  │  └── uiautomator  │  │
 │  └───────────────────┘  │           │  └───────────────────┘  │
-│  ┌───────────────────┐  │           └─────────────────────────┘
-│  │ console           │  │
-│  │ (ADB Shell 控制台) │  │
-│  └───────────────────┘  │
-└─────────────────────────┘
+└─────────────────────────┘           └─────────────────────────┘
 ```
 
 ## 核心组件
@@ -66,28 +63,28 @@
 
 ### 2. 油猴脚本（浏览器端）
 
-**browser-agent.user.js：**
+**browser-agent-xbrowser.user.js：**
 - 每 2 秒轮询 `/api/browser/commands`
 - 执行 DOM 操作（click、type、eval 等）
 - 上报状态到 `/api/browser/heartbeat` 和 `/api/browser/result`
-
-**ai_bridge.user.js：**
-- AI 平台页面专用桥接
-- 自动输入问题、获取回答
+- 用 `fetch` 替代 `GM_xmlhttpRequest`（适配 XBrowser）
 
 **console.user.js：**
 - 提供浏览器内 ADB Shell 控制台
 - 通过 HTTP 调用服务端 Shell API
+- 封装 tap/swipe/type/screenshot/uidump 等
 
 ### 3. CLI 工具
 
-**browser_cli.sh：**
+**ai_client.py（AI 问答客户端）：**
+- 薄层设计：读 `agents.yaml` + 调通用 API
+- 流式回答检测：轮询字数，连续两次不变 = 完成
+- 支持结构化 JSON 问题
+- 新增平台零代码改动
+
+**browser_cli.sh（浏览器控制 CLI）：**
 - 20+ 浏览器控制命令
 - 同步执行，阻塞等待结果
-
-**ai_ask.py：**
-- 多 AI 平台问答客户端
-- 支持单问、多问、多 AI 讨论模式
 
 ## 数据流
 
@@ -107,11 +104,12 @@
 ### AI 问答流程
 
 ```
-1. ai_ask.py 调用 /api/browser/ensure 确保页面
-2. ai_ask.py 发送 type 命令输入问题
-3. ai_ask.py 发送 eval 命令点击发送
-4. 等待 AI 回答渲染
-5. ai_ask.py 发送 eval 命令提取回答文本
+1. ai_client.py 读 agents.yaml 获取平台 selector
+2. 调用 /api/browser/ensure 确保页面
+3. 发送 type 命令输入问题
+4. 发送 eval 命令点击发送（结构检测）
+5. 流式检测回答完成（轮询字数）
+6. 发送 eval 命令提取回答文本
 ```
 
 ## 安全机制
@@ -144,16 +142,17 @@ ALLOWED_PREFIXES = (
 
 ## 扩展指南
 
-### 添加新的浏览器命令
-
-1. 在 `browser-agent.user.js` 的 `execCommand` 函数中添加新的 `case`
-2. 在 `browser_cli.sh` 中添加对应的 CLI 命令
-3. 在 `docs/api.md` 中记录
-
 ### 添加新的 AI 平台
 
-1. 在 `ai_ask.py` 的 `AGENTS` 字典中添加配置
+1. 在 `config/agents.yaml` 中添加配置
 2. 配置包括：URL、输入框选择器、回答选择器等
+3. 无需修改任何代码
+
+### 添加新的浏览器命令
+
+1. 在 `browser-agent-xbrowser.user.js` 的 `execCommand` 函数中添加新的 `case`
+2. 在 `cli/browser_cli.sh` 中添加对应的 CLI 命令
+3. 在 `docs/api.md` 中记录
 
 ### 添加新的 Shell 白名单
 
