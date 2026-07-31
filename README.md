@@ -86,8 +86,14 @@ browser-agent/
 ### 1. 启动桥接服务
 
 ```bash
+# 方式一：Makefile
 make start
-# 或: cd server && python3 shizuku_bridge.py
+
+# 方式二：启动脚本
+bash ~/start-bridge.sh start
+
+# 方式三：手动
+cd server && python3 shizuku_bridge.py
 ```
 
 验证：`curl -s http://127.0.0.1:8123/api/health`
@@ -232,6 +238,13 @@ make lint
 # 一键操作
 make help
 ```
+
+## 已知问题
+
+| 问题 | 原因 | 状态 |
+|------|------|------|
+| 千问输入失败 | 千问用 contenteditable div，`type` 命令不兼容 | 待修复 |
+| `GM_xmlhttpRequest` 优先策略在 XBrowser 中不可用 | XBrowser 限制 | 已修复，使用 fetch 优先 |
 
 ## License
 
