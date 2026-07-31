@@ -1,0 +1,14 @@
+# Browser Agent — Python 依赖声明
+# 核心服务端使用纯标准库，无需额外依赖
+# 以下为开发和测试依赖
+
+# 测试框架
+pytest>=7.0
+pytest-cov>=4.0
+
+# 代码质量
+flake8>=6.0
+mypy>=1.0
+
+# 可选：用于高级功能
+# requests>=2.31.0  # 如需替代 urllib

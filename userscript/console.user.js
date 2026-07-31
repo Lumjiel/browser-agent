@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Shizuku Bridge 控制台
+// @name         Browser Console (ADB Shell)
 // @namespace    http://tampermonkey.net/
 // @version      1.0
-// @description  通过 rish + Shizuku 在浏览器中执行 adb shell 命令
+// @description  通过 rish + Shizuku 在浏览器中执行 adb shell 命令（模拟输入/截图/UI dump）
 // @match        *://*/*
 // @grant        GM_xmlhttpRequest
 // @connect      127.0.0.1

@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         豆包自动问答桥接 (fetch版)
+// @name         AI 通用问答桥接 (fetch版)
 // @namespace    http://tampermonkey.net/
 // @version      2.0
-// @description  自动从队列读取问题 → 输入豆包 → 获取回答 → 传回队列
+// @description  自动从队列读取问题 → 输入 AI 平台 → 获取回答 → 传回队列（支持豆包/Deepseek/千问等）
 // @match        *://*/*
 // @grant        none
 // ==/UserScript==

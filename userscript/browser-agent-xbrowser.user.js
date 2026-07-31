@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         Browser Agent (XBrowser 适配版)
-// @namespace    https://github.com/npezarro/claude-browser-agent
+// @namespace    https://github.com/Lumjiel/browser-agent
 // @version      2.0.0
 // @description  通用浏览器代理 - 轮询获取命令，执行 DOM 操作。适配 XBrowser（用 fetch 替代 GM_xmlhttpRequest）
-// @author       npezarro (adapted for XBrowser)
+// @author       npezarro (adapted for XBrowser), Lumjiel (localized)
 // @match        *://*/*
 // @grant        none
 // @run-at       document-idle

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-doubao_ask.py - 多 AI 问答客户端（Pi 端直接控制）
+ai_ask.py - 多 AI 问答客户端（Pi 端直接控制）
 用法:
-  python3 doubao_ask.py "你的问题"           # 问豆包（默认）
-  python3 doubao_ask.py "你的问题" -a deepseek  # 问 Deepseek
-  python3 doubao_ask.py "你的问题" -m          # 多 AI 讨论模式
+  python3 ai_ask.py "你的问题"           # 问豆包（默认）
+  python3 ai_ask.py "你的问题" -a deepseek  # 问 Deepseek
+  python3 ai_ask.py "你的问题" -m          # 多 AI 讨论模式
 """
 import json
 import time
