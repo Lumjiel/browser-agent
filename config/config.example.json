@@ -1,0 +1,18 @@
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8123,
+    "token": "MY_SECRET_123456"
+  },
+  "browser": {
+    "package": "com.mmbox.xbrowser",
+    "activity": ".BrowserActivity"
+  },
+  "features": {
+    "shell_whitelist": true,
+    "auto_launch_browser": true,
+    "log_results": true,
+    "max_results": 500,
+    "max_logs": 200
+  }
+}

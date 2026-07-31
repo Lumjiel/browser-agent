@@ -1,0 +1,14 @@
+[Unit]
+Description=Shizuku Bridge - Browser Agent Python Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/path/to/browser-agent/server
+ExecStart=/usr/bin/python3 shizuku_bridge.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,114 +1,155 @@
-# Claude Browser Agent
+# Browser Agent — 浏览器远程控制桥接系统
 
-A generic remote browser control system that lets Claude CLI (or any CLI tool) send commands to a live browser via a Tampermonkey userscript and a lightweight Node.js relay server.
+> 基于 [claude-browser-agent](https://github.com/npezarro/claude-browser-agent) 本地化改造，适配 Android/Termux + XBrowser + Shizuku 环境。
 
-## Architecture
+## 架构
 
 ```
-browser-cli.sh ──(HTTPS)──▶ agent-server.js (relay) ◀──(poll)── browser-agent.user.js (browser)
+┌─────────────┐     HTTP      ┌──────────────────┐     rish/ADB     ┌─────────────┐
+│  Pi / CLI   │ ◄──────────► │  Python Bridge    │ ◄──────────────► │  XBrowser   │
+│  (doubao_ask)│              │  (shizuku_bridge) │                  │  (油猴脚本)  │
+└─────────────┘              └──────────────────┘                  └─────────────┘
 ```
 
-- **browser-agent.user.js** — Tampermonkey userscript, matches all pages, polls for commands every 3s
-- **agent-server.js** — Node.js relay server, queues commands and collects results
-- **browser-cli.sh** — Bash CLI wrapper with 30+ commands
+**与原项目的主要差异：**
 
-## Quick Start
+| 原项目 | 本地化改造 |
+|--------|-----------|
+| Node.js 服务端 | **Python 3 纯标准库**（无依赖） |
+| GM_xmlhttpRequest | **fetch()**（适配 XBrowser） |
+| localhost 部署 | **Termux + Shizuku** 环境 |
+| 仅浏览器控制 | **+ Shell 命令中继 + AI 问答** |
 
-### 1. Server
+## 目录结构
+
+```
+browser-agent/
+├── server/
+│   ├── shizuku_bridge.py        # Python 桥接服务端（核心）
+│   └── shizuku_bridge.service   # systemd 服务文件
+├── userscript/
+│   ├── browser-agent-xbrowser.user.js  # 通用浏览器代理（XBrowser 适配）
+│   ├── shizuku_userscript.js           # Shizuku 控制台（shell 命令）
+│   └── shizuku_doubao.js              # 豆包自动问答桥接
+├── cli/
+│   └── doubao_ask.py            # 多 AI 问答客户端
+├── config/
+│   └── config.example.json      # 配置示例
+└── docs/
+    └── setup.md                 # 安装配置指南
+```
+
+## 快速开始
+
+### 1. 启动桥接服务端
 
 ```bash
-cp .env.example .env
-# Edit .env — set BROWSER_AGENT_KEY to a random secret
-npm install
-node agent-server.js
+cd server
+python3 shizuku_bridge.py
+# ✅ Shizuku Bridge 已启动: http://127.0.0.1:8123
 ```
 
-### 2. Browser
+### 2. 安装油猴脚本
 
-Install [Tampermonkey](https://www.tampermonkey.net/), then install `browser-agent.user.js`.
+1. 安装 [Tampermonkey](https://www.tampermonkey.net/)（或 XBrowser 内置油猴支持）
+2. 安装 `userscript/browser-agent-xbrowser.user.js`
+3. 脚本默认连接 `http://127.0.0.1:8123`
 
-The userscript defaults to `http://localhost:3102`. To point it at a remote server, open your browser console on any page and run:
-
-```js
-GM_setValue("BROWSER_AGENT_API", "https://your-server.com/api/browser-agent")
-```
-
-### 3. CLI
+### 3. 使用 AI 问答客户端
 
 ```bash
-export BROWSER_AGENT_KEY="your-secret-key"
-export BROWSER_AGENT_URL="http://localhost:3102"  # or your remote server
+# 向豆包提问
+python3 cli/doubao_ask.py "什么是 AI Agent？"
 
-# Check connection
-./browser-cli.sh health
-./browser-cli.sh tabs
+# 向 Deepseek 提问
+python3 cli/doubao_ask.py "什么是 AI Agent？" -a deepseek
 
-# Control the browser
-./browser-cli.sh navigate "https://example.com"
-./browser-cli.sh click "Sign In"
-./browser-cli.sh text
+# 多 AI 讨论模式
+python3 cli/doubao_ask.py "什么是 AI Agent？" -m
+
+# 打开指定 URL
+python3 cli/doubao_ask.py "" -o https://www.doubao.com/chat/
 ```
 
-## Commands
+## API 接口
 
-| Command | Description |
-|---------|-------------|
-| `tabs` | List active browser tabs |
-| `state [tabId]` | Full page state (buttons, inputs, text) |
-| `text [tabId] [maxLen]` | Get body text |
-| `click <"text"\|selector> [tabId]` | Click a button/link |
-| `click-any <"text"> [tabId]` | Click any element with matching text |
-| `navigate <url> [tabId]` | Navigate to URL |
-| `open <url>` | Open URL in new tab |
-| `close [tabId]` | Close tab |
-| `ensure <url> [wait_s]` | Reuse or open tab (idempotent) |
-| `eval <code> [tabId]` | Execute JS in page |
-| `set-input <selector> <value>` | Set input value |
-| `type <selector> <text>` | Type with keystrokes |
-| `fill <json>` | Batch fill form fields |
-| `upload <selector> <filepath>` | Upload local file to input |
-| `wait-for <selector> [timeout]` | Wait for element |
-| `wait-text <text> [timeout]` | Wait for text to appear |
-| `wait-render [minLen] [timeout]` | Wait for SPA hydration |
-| `assert-text <text>` | Assert text exists |
-| `assert <selector>` | Assert element exists |
-| `ping` | Ping browser agent |
-| `health` | Server health check |
+### 浏览器代理 API
 
-### Flags
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/browser/command` | 异步提交命令 |
+| POST | `/api/browser/interactive` | 同步执行（阻塞等待结果） |
+| POST | `/api/browser/navigate` | 导航到 URL 并等待加载 |
+| POST | `/api/browser/ensure` | 确保有 tab 在目标页面（自动启动浏览器） |
+| GET | `/api/browser/state` | 获取所有 tab 状态 |
+| GET | `/api/browser/commands` | 油猴脚本轮询获取命令 |
+| POST | `/api/browser/result` | 油猴脚本回传执行结果 |
+| POST | `/api/browser/heartbeat` | 油猴脚本上报页面状态 |
+| POST | `/api/browser/log` | 油猴脚本上报日志 |
+| GET | `/api/browser/results` | 获取最近执行结果 |
+| GET | `/api/browser/logs` | 获取最近日志 |
 
-- `--nth N` — Click the Nth match (for duplicate text buttons)
-- `--drag-drop` — Use drag-and-drop upload mode
+### Shell 命令 API（需鉴权）
 
-## How It Works
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/shell` | 执行 shell 命令（需 Bearer Token + 白名单） |
+| GET | `/api/health` | 健康检查 |
 
-1. The **relay server** holds a command queue per browser tab
-2. The **Tampermonkey userscript** polls the server every 3 seconds for pending commands
-3. When the **CLI** sends a command via `/agent/interactive`, it blocks until the browser executes it and returns the result
-4. Auth: CLI requests require a `Bearer` token; browser-to-server communication is unauthenticated (same-origin polling)
+## 支持的命令
 
-## Deployment
+### 浏览器 DOM 操作
 
-For remote deployment (behind a reverse proxy):
+- `getState` — 获取页面状态（按钮、输入框、文本）
+- `getBodyText` — 获取页面正文
+- `querySelector` — DOM 查询
+- `click` — 点击元素
+- `type` — 输入文字
+- `navigate` — 导航到 URL
+- `eval` — 执行 JavaScript
+- `getConsoleLog` — 获取控制台日志
+- `screenshot` — 截图
 
-```bash
-export VM_USER=youruser VM_HOST=yourserver.com VM_KEY=~/.ssh/your_key
-bash deploy.sh
+### Shell 命令（白名单）
+
+- `input tap/swipe/text/keyevent` — 模拟输入
+- `uiautomator dump` — 获取 UI 树
+- `screencap` — 截图
+- `am start/force-stop/broadcast` — 应用管理
+- `dumpsys` — 设备信息
+- `cat/head/tail/ls` — 文件读取（只读）
+
+## 配置
+
+复制 `config/config.example.json` 为 `config/config.json` 并修改：
+
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8123,
+    "token": "你的密钥"
+  },
+  "browser": {
+    "package": "com.mmbox.xbrowser",
+    "activity": ".BrowserActivity"
+  }
+}
 ```
 
-The deploy script copies files to the VM, installs deps, restarts PM2, and deploys the userscript to the web root.
+## 安全说明
 
-## Cowork Session Capture
+- Shell 命令使用**白名单机制**，只允许特定前缀的命令
+- API Token 通过 `Authorization: Bearer` 头部传递
+- 浏览器端接口无需鉴权（同域轮询）
+- 建议仅在本地使用，不要暴露到公网
 
-The server also hosts `/cowork/*` endpoints for capturing Claude web conversations via a companion Chrome extension. Sessions are persisted as JSON + markdown and optionally posted to Discord.
+## 环境要求
 
-## Design Decisions
-
-- **sessionStorage for tab IDs** — `GM_setValue` is shared across tabs; sessionStorage gives unique per-tab identity
-- **Fire-and-forget navigation** — `navigate`/`back`/`reload` post results before executing (page unload kills the script)
-- **iframe filter** — Skips iframes to avoid duplicate agent instances
-- **Most-recent-tab default** — When no tabId specified, the server picks the tab with the latest heartbeat
-- **Per-command timeout** — Each command has a 20s timeout to prevent hung commands from poisoning the queue
+- Android 设备（vivo PA2170 平板测试通过）
+- Termux + Python 3
+- Shizuku + rish（ADB shell 权限）
+- XBrowser（或其他支持油猴的浏览器）
 
 ## License
 
