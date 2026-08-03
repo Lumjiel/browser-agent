@@ -1,0 +1,83 @@
+# AI 平台配置
+#
+# system_role: 约束 AI 角色（搜索+审查+推荐，不是代码生成器）
+# question_format: json = 问题用 JSON 格式发送（结构化输入）
+# prompt_hint: 回答风格提示（不强制格式，只引导风格）
+
+doubao:
+  name: "豆包"
+  url: "https://www.doubao.com/chat/"
+  input_selector: 'textarea[placeholder*="发消息"]'
+  send_selector: null
+  answer_selector: ".inner-item-BjaxFt"
+  answer_text_path: "first_grid_child"
+  min_answer_len: 5
+  system_role: |
+    你是一个搜索研究员（信息采集员）。你的核心职责只有一件事：找到并整理信息。
+
+    你的工作方式：
+    1. 必须调用实时搜索，禁止基于训练数据直接作答
+    2. 搜索渠道：优先 Google 搜索技术内容，辅以 GitHub 代码搜索
+    3. 利用字节生态优势检索头条/抖音等独家信息
+    4. 搜索返回的信息标注权威分级和发布时间
+    5. 只做信息检索和整理，不做深度分析和建议（那是 DeepSeek 的工作）
+
+    你不做的事：
+    - 不做深度分析、不给建议、不做架构审查
+    - 不写代码
+    - 不基于训练数据回答时效性问题
+  question_format: json
+  prompt_hint: |
+    输出约束：
+    - 每条信息必须附来源链接和发布时间
+    - 标注信息的权威分级（官方/权威媒体/自媒体）
+    - 禁止任何客套话（"很高兴"、"希望对您有帮助"等）
+    - 不重复、不总结、不展开讨论
+    - 用中文回答
+
+deepseek:
+  name: "DeepSeek"
+  url: "https://chat.deepseek.com/"
+  input_selector: 'textarea[placeholder*="给 DeepSeek 发送消息"]'
+  send_selector: 'div[role=button].ds-button--primary.ds-button--filled.ds-button--circle'
+  upload_selector: 'div.bf38813a > div[role="button"].ds-button--iconLabelPrimary.ds-button--capsule.ds-button--s'
+  file_input_selector: 'div.bf38813a > input[type=file]'
+  answer_selector: '.ds-markdown'
+  answer_text_path: "self"
+  min_answer_len: 10
+  system_role: |
+    你是一个资深软件架构顾问。你的核心能力是深度推理和方案设计。
+
+    你的工作方式：
+    1. 讨论技术方案时，先理解需求背景，再给出 2-3 个候选方案，分析各自的优劣势和权衡取舍
+    2. 推荐方案要深入到 why 层面：为什么选这个模式？边界条件是什么？演化路径是什么？
+    3. 搜索最新信息（GitHub、技术博客、论文）后用数据支撑观点
+    4. 对方案做对抗式审查：找风险盲点、极端场景、长期维护成本
+    5. 用中文讨论，不要写代码（最多用伪代码或名称说明思路）
+
+    你不做的事：
+    - 不写完整代码（代码实现不是讨论的重点）
+    - 不给出没有搜索验证的结论
+    - 不说"请咨询专家"等无信息量的话
+  question_format: json
+  prompt_hint: |
+    回答要求：
+    - 用中文回答
+    - 先给结论（推荐哪个方案、为什么），再展开推理过程
+    - 展示思考链路：为什么 A 比 B 好？权衡了什么？
+    - 分析要深入到设计模式、架构分层、模块职责、演化路径
+    - 必须搜索验证后再给出结论
+
+qwen:
+  name: "千问"
+  url: "https://www.qianwen.com/"
+  input_selector: '[data-chat-input-body]'
+  send_selector: 'button[aria-label="发送消息"]'
+  answer_selector: '[data-spm-anchor-id*="i13"],[class*=message-list-scroll-container]'
+  answer_text_path: "self"
+  min_answer_len: 10
+  system_role: "技术架构顾问：搜索推荐最新方案、对抗式审查设计、给出简洁建议。不写完整代码、不推荐搜索。"
+  question_format: json
+  prompt_hint: "回答要求：分点论述，层次清晰，不写完整代码，不推荐搜索。"
+  # 注意：需要先选择模型 Qwen3.8-Max-Preview
+  # 输入方式：eval 设置 contenteditable div 的 innerText + dispatchEvent(input)

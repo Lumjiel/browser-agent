@@ -1,0 +1,11 @@
+# 豆包平台配置（纯数据，无逻辑）
+# 提示词文件: system_role.txt / prompt_hint.txt / strategies/*.txt
+name: "豆包"
+url: "https://www.doubao.com/chat/"
+input_selector: 'textarea[placeholder*="发消息"]'
+send_selector: null
+send_method: structure_detect
+answer_selector: ".inner-item-BjaxFt"
+answer_text_path: "first_grid_child"
+min_answer_len: 5
+question_format: json
