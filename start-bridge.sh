@@ -1,8 +1,9 @@
 #!/bin/bash
-# start-bridge.sh — 启动 Browser Agent 桥接服务
-# 用法: bash ~/start-bridge.sh [start|stop|status]
+# start-bridge.sh — 启动 Browser Bridge 桥接服务
+# 用法: bash ~/projects/active/browser-agent/start-bridge.sh [start|stop|status]
 
-PROJECT_DIR="$HOME/projects/browser-agent/server"
+PROJECT_DIR="$HOME/projects/active/browser-agent"
+BRIDGE_SCRIPT="shizuku_bridge.py"
 LOG_FILE="$PREFIX/tmp/bridge.log"
 PID_FILE="$PREFIX/tmp/bridge.pid"
 
@@ -13,7 +14,7 @@ case "${1:-start}" in
       exit 0
     fi
     cd "$PROJECT_DIR" || exit 1
-    python3 shizuku_bridge.py > "$LOG_FILE" 2>&1 &
+    python3 "$BRIDGE_SCRIPT" > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     sleep 2
     if kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
