@@ -5,13 +5,13 @@
 [![CI](https://github.com/Lumjiel/browser-agent/workflows/CI/badge.svg)](https://github.com/Lumjiel/browser-agent/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 架构（三层解耦）
+## 架构
 
 ```
 ┌──────────────────────────────────────────────┐
-│  ai_client.py（客户端 · 薄层）                  │
-│  ├── 读 agents.yaml → 获取平台 selector 配置    │
-│  └── ask(question, agent_key)                 │
+│  上层客户端（不属于本仓库）                     │
+│  任何 HTTP 客户端：curl / Python / AI 问答工具  │
+└──────────────────────────────────────────────┘
 │      → 调 server API + 配置中的 selector        │
 └──────────────────────────────────────────────┘
                     ↑
@@ -42,9 +42,8 @@
 ```
 
 **设计原则**：
-- **服务器端**只负责通用操作（导航、DOM 命令中继、tab 管理），不含平台逻辑
-- **客户端**是薄层，只读配置 + 调 API，不含硬编码 selector
-- **平台配置**纯数据（agents.yaml），新增平台零代码改动
+- **本仓库只含通用桥接层**（导航、DOM 命令中继、tab 管理、Shell 中继），不含任何平台/业务逻辑
+- AI 问答客户端（ai_client.py + 平台配置）属于个人业务需求，已迁出至 `~/tools/ai-ask/`
 
 ## 目录结构
 
@@ -67,10 +66,8 @@ browser-agent/
 │   ├── browser-agent-xbrowser.user.js  ← 通用浏览器代理（XBrowser 适配）
 │   └── console.user.js                 ← ADB Shell 控制台
 ├── cli/
-│   ├── ai_client.py            ← AI 问答客户端（薄层，读 agents.yaml）
 │   └── browser_cli.sh          ← 浏览器控制 CLI（20+ 命令）
 ├── config/
-│   ├── agents.yaml             ← AI 平台配置（selector + 角色约束）
 │   └── config.example.json     ← 服务端配置示例
 ├── docs/
 │   ├── setup.md                ← 安装配置指南
@@ -104,31 +101,9 @@ cd server && python3 shizuku_bridge.py
 2. 粘贴 `userscript/browser-agent-xbrowser.user.js` 内容
 3. 保存启用
 
-### 3. 使用 AI 问答
+### 3. AI 问答（已迁出本仓库）
 
-```bash
-# 问豆包（默认）
-python3 cli/ai_client.py "什么是 AI Agent？"
-
-# 问 DeepSeek
-python3 cli/ai_client.py "什么是 AI Agent？" -a deepseek
-
-# 结构化 JSON 问题（推荐）
-python3 cli/ai_client.py '{
-  "task": "search_and_review",
-  "context": "浏览器代理系统",
-  "target": "搜索最新类似项目，对比架构差异"
-}' -a doubao
-
-# 多 AI 讨论
-python3 cli/ai_client.py "什么是 AI Agent？" -m
-
-# 列出可用平台
-python3 cli/ai_client.py --list
-
-# 打开网页
-python3 cli/ai_client.py --open "https://www.baidu.com/"
-```
+AI 问答客户端属于个人业务需求，已迁至 `~/tools/ai-ask/`（通用引擎 + `agents/<平台>/` 配置目录），不在本仓库维护。
 
 ### 4. 浏览器控制 CLI
 
@@ -148,42 +123,18 @@ python3 cli/ai_client.py --open "https://www.baidu.com/"
 - **SPA 支持**：waitForRender、waitForSelector、waitForText
 - **Console 捕获**：获取页面 console 日志
 
-### 🤖 AI 问答（三层解耦）
-- **薄层客户端**：`ai_client.py` 读 `agents.yaml` + 调通用 API
-- **新增平台零代码**：只需在 `agents.yaml` 加一段配置
-- **流式回答检测**：轮询字数，连续两次不变 = 完成
-- **多 AI 讨论模式**：一问多答，对比分析
+### 🤖 AI 问答（已迁出）
+- 问答客户端与平台配置属于个人业务需求，已迁至 `~/tools/ai-ask/`
+- 本仓库只提供通用桥接 API，任何客户端可对接
 
 ### 🔧 Shell 命令
 - **白名单机制**：只允许安全的命令前缀
 - **ADB 模拟输入**：tap、swipe、text、keyevent
 - **设备信息**：dumpsys、uiautomator dump、screencap
 
-## 平台配置（agents.yaml）
+## 平台配置（已迁出）
 
-```yaml
-doubao:
-  name: "豆包"
-  url: "https://www.doubao.com/chat/"
-  input_selector: 'textarea[placeholder*="发消息"]'
-  send_selector: null  # 自动结构检测
-  answer_selector: ".inner-item-BjaxFt"
-  answer_text_path: "first_grid_child"
-  min_answer_len: 5
-  system_role: "技术架构顾问..."
-  question_format: json
-  prompt_hint: "分点论述，不写完整代码..."
-
-deepseek:
-  name: "DeepSeek"
-  url: "https://chat.deepseek.com/"
-  input_selector: 'textarea[placeholder*="给 DeepSeek 发送消息"]'
-  send_selector: 'div[role=button].ds-button--primary.ds-button--filled.ds-button--circle'
-  answer_selector: '.ds-markdown'
-  answer_text_path: "self"
-  min_answer_len: 10
-  ...
-```
+AI 平台配置（selector、角色、提示词）已迁至 `~/tools/ai-ask/agents/<平台>/`，与本仓库解耦。
 
 ## API 接口
 
