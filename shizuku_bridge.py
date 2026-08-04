@@ -9,6 +9,7 @@ Shizuku HTTP Bridge - 纯标准库实现
   Pi        ←→ HTTP ←→ 本服务
 
 浏览器代理 API（通用）:
+  POST /api/browser/adb        ADB 降级模式（点击/输入/截图/提取）
   POST /api/send              统一命令接口（排队→等待→返回）
   POST /api/browser/command    异步提交命令
   POST /api/browser/interactive 同步执行（阻塞等待结果）
@@ -80,6 +81,105 @@ browser_launching = threading.Event()  # set = 正在启动中
 
 import threading
 browser_lock = threading.Lock()
+
+# ========== ADB 降级模式（油猴脚本离线时兜底）==========
+
+ADB_FALLBACK_COMMANDS = {"click", "type", "tap", "swipe", "text", "screenshot", "dump", "scroll"}
+
+def _adb_check(script_path="/sdcard/browser.xml"):
+    """ADB 执行 shell 命令的底层"""
+    def run(cmd, timeout=15):
+        try:
+            r = subprocess.run(["rish", "-c", cmd], capture_output=True, text=True, timeout=timeout)
+            return r.stdout, r.stderr, r.returncode
+        except subprocess.TimeoutExpired:
+            return "", "timeout", -1
+        except Exception as e:
+            return "", str(e), -1
+    return run
+
+def adb_uiautomator_dump(xml_path="/sdcard/browser.xml"):
+    """通过 ADB 获取 UI 元素树"""
+    run = _adb_check()
+    stdout, stderr, rc = run(f"uiautomator dump {xml_path}")
+    if rc != 0:
+        return None, stderr
+    stdout, stderr, rc = run(f"cat {xml_path}")
+    if rc != 0:
+        return None, stderr
+    return stdout, None
+
+def adb_parse_elements(xml_text):
+    """解析 uiautomator dump XML 为结构化元素列表"""
+    import re
+    elements = []
+    for node in re.findall(r'<node[^>]*>', xml_text):
+        text = re.search(r'text="([^"]*)"', node)
+        desc = re.search(r'content-desc="([^"]*)"', node)
+        rid = re.search(r'resource-id="([^"]*)"', node)
+        cls = re.search(r'class="([^"]*)"', node)
+        bounds = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node)
+        if bounds:
+            x1, y1, x2, y2 = int(bounds.group(1)), int(bounds.group(2)), int(bounds.group(3)), int(bounds.group(4))
+            elements.append({
+                "text": text.group(1) if text else "",
+                "content-desc": desc.group(1) if desc else "",
+                "resource-id": rid.group(1) if rid else "",
+                "class": cls.group(1).split(".")[-1] if cls else "",
+                "bounds": [x1, y1, x2, y2],
+                "center": [(x1+x2)//2, (y1+y2)//2],
+            })
+    return elements
+
+def adb_find_element(elements, text=None, desc=None, rid=None):
+    """从元素列表中查找目标"""
+    for el in elements:
+        if text and text.lower() in el["text"].lower():
+            return el
+        if desc and desc.lower() in el["content-desc"].lower():
+            return el
+        if rid and rid in el["resource-id"]:
+            return el
+    return None
+
+def adb_fallback_click(x, y):
+    """ADB 模拟点击"""
+    run = _adb_check()
+    _, stderr, rc = run(f"input tap {x} {y}")
+    return rc == 0, stderr
+
+def adb_fallback_type(text):
+    """ADB 模拟输入（需先点击输入框）"""
+    # 转义特殊字符
+    safe = text.replace(" ", "%s").replace("'", "\'").replace('"', '\"')
+    run = _adb_check()
+    _, stderr, rc = run(f"input text '{safe}'")
+    return rc == 0, stderr
+
+def adb_fallback_swipe(x1, y1, x2, y2, duration=300):
+    """ADB 模拟滑动"""
+    run = _adb_check()
+    _, stderr, rc = run(f"input swipe {x1} {y1} {x2} {y2} {duration}")
+    return rc == 0, stderr
+
+def adb_fallback_screenshot(path="/sdcard/browser_screenshot.png"):
+    """ADB 截图"""
+    run = _adb_check()
+    _, stderr, rc = run(f"screencap -p {path}")
+    return rc == 0, stderr
+
+def is_tamonkey_alive(tab_id=None, max_age=10):
+    """检查油猴脚本是否在线（最近 max_age 秒内有心跳）"""
+    with browser_lock:
+        if tab_id:
+            tab = browser_tabs.get(tab_id, {})
+            last = tab.get("updated_at", 0)
+            return (time.time() - last) < max_age
+        # 检查任意 tab
+            for tid, info in browser_tabs.items():
+                if (time.time() - info.get("updated_at", 0)) < max_age:
+                    return True
+    return False
 
 # ========== 客户端管理（借鉴 hermes-browser-bridge）==========
 # clients: client_id -> {ip, last_seen, url, queue, connected}
@@ -402,13 +502,20 @@ class ShizukuHandler(BaseHTTPRequestHandler):
             return
 
         if parsed_path == "/api/browser/interactive":
-            # 同步执行：发送命令并等待结果
+            # 同步执行：发送命令并等待结果（支持 ADB 降级）
             data = self._read_json_body()
             if data is None:
                 return self._send_json({"error": "invalid json"}, 400)
             action = data.get("action", "").strip()
             if not action:
                 return self._send_json({"error": "缺少action"}, 400)
+
+            # ADB 降级模式：油猴离线时走 ADB
+            tab_id = data.get("tabId", "default")
+            use_adb = data.get("adb", False)
+            if not use_adb and not is_tamonkey_alive(tab_id):
+                if action in ADB_FALLBACK_COMMANDS:
+                    use_adb = True
             tab_id = data.get("tabId", "default")
             timeout = data.get("timeout", 30)
             with browser_lock:
@@ -423,6 +530,67 @@ class ShizukuHandler(BaseHTTPRequestHandler):
                 browser_commands[tab_id].append(cmd)
                 event = threading.Event()
                 result_waiters[cmd_id] = event
+
+            # ADB 降级执行
+            if use_adb:
+                result = None
+                if action == "dump":
+                    xml, err = adb_uiautomator_dump()
+                    if xml:
+                        elements = adb_parse_elements(xml)
+                        result = {"ok": True, "elements": elements, "count": len(elements), "mode": "adb"}
+                    else:
+                        result = {"ok": False, "error": err, "mode": "adb"}
+                elif action == "screenshot":
+                    ok, err = adb_fallback_screenshot(data.get("path", "/sdcard/browser_screenshot.png"))
+                    result = {"ok": ok, "path": "/sdcard/browser_screenshot.png", "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "click":
+                    x, y = data.get("x"), data.get("y")
+                    if x is None or y is None:
+                        # 通过文本查找坐标
+                        xml, err = adb_uiautomator_dump()
+                        if xml:
+                            elements = adb_parse_elements(xml)
+                            el = adb_find_element(elements, text=data.get("text"), desc=data.get("desc"), rid=data.get("rid"))
+                            if el:
+                                x, y = el["center"]
+                            else:
+                                result = {"ok": False, "error": "element not found", "mode": "adb"}
+                        else:
+                            result = {"ok": False, "error": err, "mode": "adb"}
+                    if x is not None and y is not None:
+                        ok, err = adb_fallback_click(x, y)
+                        result = {"ok": True, "x": x, "y": y, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "type":
+                    text = data.get("text", "")
+                    if text:
+                        ok, err = adb_fallback_type(text)
+                        result = {"ok": True, "text": text, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "tap":
+                    x, y = data.get("x"), data.get("y")
+                    ok, err = adb_fallback_click(x, y)
+                    result = {"ok": True, "x": x, "y": y, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "swipe":
+                    x1, y1 = data.get("x1", 500), data.get("y1", 1500)
+                    x2, y2 = data.get("x2", 500), data.get("y2", 500)
+                    dur = data.get("duration", 300)
+                    ok, err = adb_fallback_swipe(x1, y1, x2, y2, dur)
+                    result = {"ok": True, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "scroll":
+                    direction = data.get("direction", "up")
+                    if direction == "up":
+                        ok, err = adb_fallback_swipe(500, 1500, 500, 500)
+                    else:
+                        ok, err = adb_fallback_swipe(500, 500, 500, 1500)
+                    result = {"ok": True, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                else:
+                    result = {"ok": False, "error": f"ADB mode不支持 {action}", "mode": "adb"}
+
+                if result:
+                    result["fallback"] = True
+                    result["reason"] = "油猴脚本离线，已降级到 ADB 模式"
+                self._send_json(result or {"error": "ADB 执行失败", "mode": "adb"})
+                return
 
             if event.wait(timeout=timeout):
                 result = result_cache.pop(cmd_id, None)
@@ -504,6 +672,67 @@ class ShizukuHandler(BaseHTTPRequestHandler):
                 event = threading.Event()
                 result_waiters[cmd_id] = event
 
+            # ADB 降级执行
+            if use_adb:
+                result = None
+                if action == "dump":
+                    xml, err = adb_uiautomator_dump()
+                    if xml:
+                        elements = adb_parse_elements(xml)
+                        result = {"ok": True, "elements": elements, "count": len(elements), "mode": "adb"}
+                    else:
+                        result = {"ok": False, "error": err, "mode": "adb"}
+                elif action == "screenshot":
+                    ok, err = adb_fallback_screenshot(data.get("path", "/sdcard/browser_screenshot.png"))
+                    result = {"ok": ok, "path": "/sdcard/browser_screenshot.png", "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "click":
+                    x, y = data.get("x"), data.get("y")
+                    if x is None or y is None:
+                        # 通过文本查找坐标
+                        xml, err = adb_uiautomator_dump()
+                        if xml:
+                            elements = adb_parse_elements(xml)
+                            el = adb_find_element(elements, text=data.get("text"), desc=data.get("desc"), rid=data.get("rid"))
+                            if el:
+                                x, y = el["center"]
+                            else:
+                                result = {"ok": False, "error": "element not found", "mode": "adb"}
+                        else:
+                            result = {"ok": False, "error": err, "mode": "adb"}
+                    if x is not None and y is not None:
+                        ok, err = adb_fallback_click(x, y)
+                        result = {"ok": True, "x": x, "y": y, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "type":
+                    text = data.get("text", "")
+                    if text:
+                        ok, err = adb_fallback_type(text)
+                        result = {"ok": True, "text": text, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "tap":
+                    x, y = data.get("x"), data.get("y")
+                    ok, err = adb_fallback_click(x, y)
+                    result = {"ok": True, "x": x, "y": y, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "swipe":
+                    x1, y1 = data.get("x1", 500), data.get("y1", 1500)
+                    x2, y2 = data.get("x2", 500), data.get("y2", 500)
+                    dur = data.get("duration", 300)
+                    ok, err = adb_fallback_swipe(x1, y1, x2, y2, dur)
+                    result = {"ok": True, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                elif action == "scroll":
+                    direction = data.get("direction", "up")
+                    if direction == "up":
+                        ok, err = adb_fallback_swipe(500, 1500, 500, 500)
+                    else:
+                        ok, err = adb_fallback_swipe(500, 500, 500, 1500)
+                    result = {"ok": True, "mode": "adb"} if ok else {"ok": False, "error": err, "mode": "adb"}
+                else:
+                    result = {"ok": False, "error": f"ADB mode不支持 {action}", "mode": "adb"}
+
+                if result:
+                    result["fallback"] = True
+                    result["reason"] = "油猴脚本离线，已降级到 ADB 模式"
+                self._send_json(result or {"error": "ADB 执行失败", "mode": "adb"})
+                return
+
             if event.wait(timeout=timeout):
                 result = result_cache.pop(cmd_id, None)
                 self._send_json(result or {"error": "result lost"})
@@ -575,7 +804,8 @@ class ShizukuHandler(BaseHTTPRequestHandler):
                     tab_url = browser_tabs[existing].get("url", "")
                 return self._send_json({
                     "ok": True, "tabId": existing, "url": tab_url,
-                    "elapsed": 0, "readyState": "already_there"
+                    "elapsed": 0, "readyState": "already_there",
+                    "mode": "full" if is_tamonkey_alive(existing) else "adb"
                 })
 
             # 2. 没有 tab → 启动浏览器
@@ -627,6 +857,63 @@ class ShizukuHandler(BaseHTTPRequestHandler):
                                 })
 
             return self._send_json({"error": "ensure failed", "url": url}, 503)
+
+        # ========== ADB 直控接口（降级模式）==========
+
+        if parsed_path == "/api/browser/adb":
+            # ADB 降级模式：直接执行 ADB 操作，不走油猴脚本
+            data = self._read_json_body()
+            if data is None:
+                return self._send_json({"error": "invalid json"}, 400)
+            action = data.get("action", "").strip()
+            if not action:
+                return self._send_json({"error": "缺少action"}, 400)
+
+            if action == "dump":
+                xml, err = adb_uiautomator_dump()
+                if xml:
+                    elements = adb_parse_elements(xml)
+                    return self._send_json({"ok": True, "elements": elements, "count": len(elements), "mode": "adb"})
+                return self._send_json({"ok": False, "error": err}, 500)
+
+            if action == "click":
+                x, y = data.get("x"), data.get("y")
+                if x is None:
+                    xml, _ = adb_uiautomator_dump()
+                    if xml:
+                        elements = adb_parse_elements(xml)
+                        el = adb_find_element(elements, text=data.get("text"), desc=data.get("desc"))
+                        if el:
+                            x, y = el["center"]
+                        else:
+                            return self._send_json({"ok": False, "error": "element not found"})
+                ok, err = adb_fallback_click(x, y)
+                return self._send_json({"ok": ok, "x": x, "y": y, "mode": "adb"} if ok else {"ok": False, "error": err})
+
+            if action == "type":
+                ok, err = adb_fallback_type(data.get("text", ""))
+                return self._send_json({"ok": ok, "mode": "adb"} if ok else {"ok": False, "error": err})
+
+            if action == "screenshot":
+                ok, err = adb_fallback_screenshot(data.get("path", "/sdcard/browser_screenshot.png"))
+                return self._send_json({"ok": ok, "path": "/sdcard/browser_screenshot.png", "mode": "adb"} if ok else {"ok": False, "error": err})
+
+            if action == "swipe":
+                ok, err = adb_fallback_swipe(
+                    data.get("x1", 500), data.get("y1", 1500),
+                    data.get("x2", 500), data.get("y2", 500),
+                    data.get("duration", 300))
+                return self._send_json({"ok": ok, "mode": "adb"} if ok else {"ok": False, "error": err})
+
+            if action == "extract":
+                xml, err = adb_uiautomator_dump()
+                if xml:
+                    elements = adb_parse_elements(xml)
+                    texts = [el["text"] for el in elements if el["text"].strip()]
+                    return self._send_json({"ok": True, "texts": texts, "count": len(texts), "mode": "adb"})
+                return self._send_json({"ok": False, "error": err})
+
+            return self._send_json({"error": f"ADB 不支持 {action}", "supported": ["dump", "click", "type", "screenshot", "swipe", "extract"]}, 400)
 
         # ========== Shell 命令接口（需鉴权）==========
 
