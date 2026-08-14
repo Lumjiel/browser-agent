@@ -1,180 +1,272 @@
-# Browser Agent — 浏览器远程控制桥接系统
+# Browser Agent — 浏览器远程控制桥接
 
-> 基于 [claude-browser-agent](https://github.com/npezarro/claude-browser-agent) 本地化改造，适配 Android/Termux + XBrowser + Shizuku 环境。
+**HTTP → 油猴脚本 → 浏览器 DOM**，零外部依赖，纯标准库实现。
+
+*Android/Termux + XBrowser + Shizuku · AI Agent 的浏览器手和眼*
 
 [![CI](https://github.com/Lumjiel/browser-agent/workflows/CI/badge.svg)](https://github.com/Lumjiel/browser-agent/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## 架构
+[快速开始](#-quick-start) · [API 接口](#-api-接口) · [CLI 命令](#-cli-命令) · [架构](#-架构) · [配置](#-配置)
+
+---
+
+## 😤 问题
+
+你的 AI agent 需要操作浏览器：查资料、填表单、抓数据。
+
+| 方案 | 问题 |
+|------|------|
+| Selenium/Playwright | Android Termux 装不了，需要 Chrome + 驱动 |
+| js_shooters（纯 fetch） | 只能抓静态页面，无法操作 DOM |
+| 手动复制粘贴 | 慢、脆、不能自动化 |
+
+**你需要一个跑在手机上的轻量桥接层，让任何 HTTP 客户端都能控制浏览器。**
+
+---
+
+## ✅ 方案
+
+Browser Agent 在手机上启动一个 HTTP 服务，通过油猴脚本桥接到浏览器 DOM：
 
 ```
-┌──────────────────────────────────────────────┐
-│  上层客户端（不属于本仓库）                     │
-│  任何 HTTP 客户端：curl / Python / AI 问答工具  │
-└──────────────────────────────────────────────┘
-│      → 调 server API + 配置中的 selector        │
-└──────────────────────────────────────────────┘
-                    ↑
-                    │ HTTP 调用
-                    │
-┌──────────────────────────────────────────────┐
-│  shizuku_bridge.py（服务器端 · 通用）            │
-│  ├── /api/browser/ensure   确保在目标页面       │
-│  ├── /api/browser/navigate 导航+等待加载       │
-│  ├── /api/browser/interactive  同步 DOM 操作   │
-│  ├── /api/browser/command  异步 DOM 操作       │
-│  ├── /api/browser/state    tab 状态            │
-│  ├── /api/browser/commands 油猴脚本轮询命令     │
-│  ├── /api/browser/result   油猴脚本回传结果     │
-│  ├── /api/browser/heartbeat  油猴脚本心跳      │
-│  └── /api/shell            ADB 命令中继        │
-└──────────────────────────────────────────────┘
-                    ↑
-                    │ HTTP 轮询
-                    │
-┌──────────────────────────────────────────────┐
-│  browser-agent-xbrowser.user.js（油猴脚本）     │
-│  ├── 每 2 秒轮询获取命令                        │
-│  ├── 执行 DOM 操作（type/click/eval/...）       │
-│  ├── 回传执行结果                               │
-│  └── 心跳上报页面状态                           │
-└──────────────────────────────────────────────┘
+你的脚本/curl/AI 工具
+        │
+        ▼ HTTP POST
+┌─────────────────────┐
+│  shizuku_bridge.py  │  ← Python，纯标准库，端口 8123
+│  (127.0.0.1:8123)   │
+└─────────────────────┘
+        │
+        ▼ HTTP 轮询（每 2s）
+┌─────────────────────┐
+│  油猴脚本           │  ← XBrowser 中运行
+│  (浏览器内)         │
+└─────────────────────┘
+        │
+        ▼ DOM 操作
+   目标网页
 ```
 
-**设计原则**：
-- **本仓库只含通用桥接层**（导航、DOM 命令中继、tab 管理、Shell 中继），不含任何平台/业务逻辑
-- AI 问答客户端（ai_client.py + 平台配置）属于个人业务需求，已迁出至 `~/tools/ai-ask/`
+**特点**：服务端零依赖（纯 Python 标准库），油猴脚本 fetch 优先（兼容 XBrowser），Shell 命令白名单 + Token 鉴权。
 
-## 目录结构
+---
+
+## 🚀 Quick Start
+
+```bash
+# 1. 克隆 + 启动服务
+git clone https://github.com/Lumjiel/browser-agent
+cd browser-agent
+python3 server/shizuku_bridge.py
+# ✅ Shizuku Bridge 已启动: http://127.0.0.1:8123
+
+# 2. 验证
+curl -s http://127.0.0.1:8123/api/health | python3 -m json.tool
+
+# 3. 安装油猴脚本
+# XBrowser → 油猴管理 → 新建 → 粘贴 userscript/browser-agent-xbrowser.user.js
+
+# 4. 控制浏览器
+curl -s -X POST http://127.0.0.1:8123/api/browser/interactive \
+  -H "Content-Type: application/json" \
+  -d '{"action":"navigate","url":"https://example.com"}'
+```
+
+> **5 秒出结果**：服务启动后立即可以发请求，无需配置。
+
+---
+
+## 📊 API 接口
+
+### 浏览器代理（无需鉴权）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/browser/ensure` | 确保有 tab 在目标页面（自动开浏览器） |
+| POST | `/api/browser/navigate` | 导航到 URL 并等待加载 |
+| POST | `/api/browser/interactive` | **同步执行**（阻塞等待结果） |
+| POST | `/api/browser/command` | **异步提交**（立即返回 cmdId） |
+| GET  | `/api/browser/state` | 获取所有 tab 状态 |
+| GET  | `/api/browser/commands` | 油猴脚本轮询获取命令 |
+| POST | `/api/browser/result` | 油猴脚本回传执行结果 |
+| POST | `/api/browser/heartbeat` | 油猴脚本上报页面状态 |
+| POST | `/api/browser/log` | 油猴脚本上报日志 |
+| GET  | `/api/browser/results` | 获取最近执行结果 |
+| GET  | `/api/browser/logs` | 获取最近日志 |
+
+### Shell 命令（需 Bearer Token）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/shell` | 执行 Shell 命令（白名单 + Token） |
+| GET  | `/api/health` | 健康检查 |
+
+### 同步 vs 异步
+
+| 模式 | 端点 | 适用场景 |
+|------|------|----------|
+| 同步 | `/api/browser/interactive` | 需要立即拿到结果，≤ 30s |
+| 异步 | `/api/browser/command` | 长时间操作，通过 `/result` 回传 |
+
+---
+
+## 💻 CLI 命令
+
+`cli/browser_cli.sh` 封装了 20+ 常用操作：
+
+```bash
+# 基础
+./cli/browser_cli.sh health              # 健康检查
+./cli/browser_cli.sh tabs                # 列出所有 tab
+./cli/browser_cli.sh state               # 查看 tab 详情
+
+# 导航
+./cli/browser_cli.sh navigate "https://example.com"
+
+# DOM 操作
+./cli/browser_cli.sh click "Sign In"
+./cli/browser_cli.sh type "#email" "user@example.com"
+./cli/browser_cli.sh text                 # 获取页面文本
+./cli/browser_cli.sh eval "document.title" # 执行 JS
+
+# 其他
+./cli/browser_cli.sh screenshot           # 截图
+```
+
+环境变量：`BRIDGE_URL`（默认 `http://127.0.0.1:8123`）、`BRIDGE_TAB`（指定 tab）。
+
+---
+
+## 🔧 Shell 命令中继
+
+通过 Shizuku 执行 ADB shell 命令，**白名单 + Token 双保险**：
+
+```bash
+curl -s -X POST http://127.0.0.1:8123/api/shell \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer MY_SECRET_123456" \
+  -d '{"cmd": "input tap 500 800"}'
+```
+
+**白名单前缀**（`config.json` 中可配置）：
+
+| 类型 | 允许的命令前缀 |
+|------|---------------|
+| 输入模拟 | `input tap`、`input swipe`、`input text`、`input keyevent` |
+| 设备信息 | `dumpsys`、`uiautomator dump`、`screencap` |
+| 包管理 | `pm list`、`cmd package` |
+
+---
+
+## 🏗 架构
+
+```
+┌─────────────────────────────────────────────────┐
+│  客户端（任何 HTTP 工具）                          │
+│  curl / Python / ai_client / browser_cli.sh      │
+└─────────────────────────────────────────────────┘
+                      │ HTTP
+                      ▼
+┌─────────────────────────────────────────────────┐
+│  shizuku_bridge.py (HTTP Server · 纯标准库)       │
+│  ├── 浏览器 API：ensure / navigate / interactive  │
+│  ├── 命令队列：command → commands → result        │
+│  ├── Tab 管理：state / heartbeat                  │
+│  └── Shell API：白名单 + Token 鉴权               │
+└─────────────────────────────────────────────────┘
+                      │ HTTP 轮询（每 2s）
+                      ▼
+┌─────────────────────────────────────────────────┐
+│  browser-agent-xbrowser.user.js（油猴脚本）       │
+│  ├── 轮询 /api/browser/commands                   │
+│  ├── 执行 DOM 操作（type / click / eval / ...）   │
+│  └── 回传 /api/browser/result + heartbeat        │
+└─────────────────────────────────────────────────┘
+```
+
+**模块拆分**：
+
+| 文件 | 职责 |
+|------|------|
+| `server/shizuku_bridge.py` | HTTP 路由 + 入口 |
+| `server/browser_manager.py` | Tab 管理 + 导航 + 命令队列 |
+| `server/shell_relay.py` | Shell 白名单校验 + 执行 |
+| `server/config.py` | 配置加载 |
+
+---
+
+## ⚙️ 配置
+
+`config/config.example.json` → 复制为 `config.json`：
+
+```json
+{
+  "server": {
+    "host": "127.0.0.1",
+    "port": 8123,
+    "token": "MY_SECRET_123456"
+  },
+  "browser": {
+    "package": "com.mmbox.xbrowser",
+    "activity": ".BrowserActivity"
+  },
+  "features": {
+    "shell_whitelist": true,
+    "auto_launch_browser": true,
+    "log_results": true,
+    "max_results": 500,
+    "max_logs": 200
+  }
+}
+```
+
+| 字段 | 默认值 | 说明 |
+|------|--------|------|
+| `server.host` | `127.0.0.1` | 监听地址（不建议暴露公网） |
+| `server.port` | `8123` | 监听端口 |
+| `server.token` | — | Shell API 的 Bearer Token |
+| `browser.package` | `com.mmbox.xbrowser` | 目标浏览器包名 |
+| `features.shell_whitelist` | `true` | Shell 白名单开关 |
+
+---
+
+## 📁 项目结构
 
 ```
 browser-agent/
-├── README.md                   ← 本文件
-├── LICENSE                     ← MIT 许可证
-├── CHANGELOG.md                ← 变更日志
-├── Makefile                    ← 一键操作
-├── .github/
-│   └── workflows/ci.yml       ← CI 自动化
 ├── server/
-│   ├── shizuku_bridge.py       ← 主入口（HTTP 路由）
-│   ├── browser_manager.py      ← Tab 管理 + 导航逻辑
-│   ├── shell_relay.py          ← Shell 命令中继 + 白名单
-│   ├── config.py               ← 配置加载
-│   ├── shizuku_bridge.service  ← systemd 服务文件
-│   └── requirements.txt        ← 开发依赖
+│   ├── shizuku_bridge.py       # HTTP 主入口（路由分发）
+│   ├── browser_manager.py      # Tab 管理 + 导航 + 命令队列
+│   ├── shell_relay.py          # Shell 白名单校验 + 执行
+│   ├── config.py               # 配置加载
+│   ├── shizuku_bridge.service  # systemd 服务文件
+│   └── requirements.txt        # 开发依赖（仅测试用）
 ├── userscript/
-│   ├── browser-agent-xbrowser.user.js  ← 通用浏览器代理（XBrowser 适配）
-│   └── console.user.js                 ← ADB Shell 控制台
+│   ├── browser-agent-xbrowser.user.js  # XBrowser 油猴脚本
+│   └── console.user.js                 # ADB Shell 控制台
 ├── cli/
-│   └── browser_cli.sh          ← 浏览器控制 CLI（20+ 命令）
+│   └── browser_cli.sh          # 浏览器 CLI（20+ 命令）
+├── scripts/
+│   ├── ask-deepseek.sh         # DeepSeek 问答脚本
+│   └── ask-deepseek-free.sh    # DeepSeek 免费版脚本
 ├── config/
-│   └── config.example.json     ← 服务端配置示例
+│   └── config.example.json     # 配置示例
 ├── docs/
-│   ├── setup.md                ← 安装配置指南
-│   ├── api.md                  ← API 文档
-│   └── architecture.md         ← 架构说明
-└── tests/
-    ├── test_bridge.py          ← 服务端单元测试
-    └── test_cli.sh             ← CLI 集成测试
+│   ├── api.md                  # 完整 API 文档
+│   ├── setup.md                # 安装配置指南
+│   └── architecture.md         # 架构详解
+├── tests/
+│   ├── test_bridge.py          # 服务端单元测试
+│   └── test_cli.sh             # CLI 集成测试
+├── Makefile                    # make start / stop / test / lint
+├── CHANGELOG.md                # 变更日志
+└── LICENSE                     # MIT
 ```
 
-## 快速开始
+---
 
-### 1. 启动桥接服务
-
-```bash
-# 方式一：Makefile
-make start
-
-# 方式二：启动脚本
-bash ~/start-bridge.sh start
-
-# 方式三：手动
-cd server && python3 shizuku_bridge.py
-```
-
-验证：`curl -s http://127.0.0.1:8123/api/health`
-
-### 2. 安装油猴脚本
-
-1. XBrowser → 油猴管理 → 新建脚本
-2. 粘贴 `userscript/browser-agent-xbrowser.user.js` 内容
-3. 保存启用
-
-### 3. AI 问答（已迁出本仓库）
-
-AI 问答客户端属于个人业务需求，已迁至 `~/tools/ai-ask/`（通用引擎 + `agents/<平台>/` 配置目录），不在本仓库维护。
-
-### 4. 浏览器控制 CLI
-
-```bash
-./cli/browser_cli.sh health
-./cli/browser_cli.sh tabs
-./cli/browser_cli.sh navigate "https://example.com"
-./cli/browser_cli.sh click "Sign In"
-./cli/browser_cli.sh text
-```
-
-## 功能特性
-
-### 🌐 浏览器控制
-- **20+ 命令**：导航、点击、输入、断言、等待、截图等
-- **DOM 操作**：querySelector、eval、fillForm、selectOption
-- **SPA 支持**：waitForRender、waitForSelector、waitForText
-- **Console 捕获**：获取页面 console 日志
-
-### 🤖 AI 问答（已迁出）
-- 问答客户端与平台配置属于个人业务需求，已迁至 `~/tools/ai-ask/`
-- 本仓库只提供通用桥接 API，任何客户端可对接
-
-### 🔧 Shell 命令
-- **白名单机制**：只允许安全的命令前缀
-- **ADB 模拟输入**：tap、swipe、text、keyevent
-- **设备信息**：dumpsys、uiautomator dump、screencap
-
-## 平台配置（已迁出）
-
-AI 平台配置（selector、角色、提示词）已迁至 `~/tools/ai-ask/agents/<平台>/`，与本仓库解耦。
-
-## API 接口
-
-详见 [docs/api.md](docs/api.md)。
-
-### 浏览器代理 API
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/browser/ensure` | 确保在目标页面（自动启动浏览器） |
-| POST | `/api/browser/navigate` | 导航到 URL 并等待加载 |
-| POST | `/api/browser/interactive` | 同步执行（阻塞等待结果） |
-| POST | `/api/browser/command` | 异步提交命令 |
-| GET | `/api/browser/state` | 获取所有 tab 状态 |
-| POST | `/api/browser/heartbeat` | 油猴脚本上报页面状态 |
-| GET | `/api/browser/results` | 获取最近执行结果 |
-| GET | `/api/browser/logs` | 获取最近日志 |
-
-### Shell 命令 API（需鉴权）
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| POST | `/api/shell` | 执行 shell 命令（Bearer Token + 白名单） |
-| GET | `/api/health` | 健康检查 |
-
-## 安全说明
-
-- Shell 命令使用**白名单机制**，只允许特定前缀的命令
-- API Token 通过 `Authorization: Bearer` 头部传递
-- 浏览器端接口无需鉴权（同域轮询）
-- 建议仅在本地使用，不要暴露到公网
-
-## 环境要求
-
-- Android 设备（vivo PA2170 平板测试通过）
-- Termux + Python 3
-- Shizuku + rish（ADB shell 权限）
-- XBrowser（或其他支持油猴的浏览器）
-
-## 开发
+## 🧪 开发
 
 ```bash
 # 安装开发依赖
@@ -190,13 +282,20 @@ make lint
 make help
 ```
 
-## 已知问题
+**测试覆盖**：服务端单元测试（pytest）+ CLI 集成测试（bash）。
 
-| 问题 | 原因 | 状态 |
+---
+
+## ⚠️ 已知限制
+
+| 限制 | 原因 | 状态 |
 |------|------|------|
 | 千问输入失败 | 千问用 contenteditable div，`type` 命令不兼容 | 待修复 |
-| `GM_xmlhttpRequest` 优先策略在 XBrowser 中不可用 | XBrowser 限制 | 已修复，使用 fetch 优先 |
+| 不支持 Playwright | Android Termux 无 Chrome + 驱动 | 设计选择 |
+| Shell 需 Token + 白名单 | 安全考虑 | 设计选择 |
 
-## License
+---
+
+## 📜 License
 
 [MIT](LICENSE)
