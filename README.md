@@ -286,14 +286,6 @@ make help
 
 ---
 
-## ⚠️ 已知限制
-
-| 限制 | 原因 | 状态 |
-|------|------|------|
-| 千问输入失败 | 千问用 contenteditable div，`type` 命令不兼容 | 待修复 |
-| 不支持 Playwright | Android Termux 无 Chrome + 驱动 | 设计选择 |
-| Shell 需 Token + 白名单 | 安全考虑 | 设计选择 |
-
 ---
 
 ## 📜 License
