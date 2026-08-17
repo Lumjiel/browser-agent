@@ -1,0 +1,32 @@
+# DeepSeek 本地事实注册表
+# 用途：讨论涉及本地环境的问题时注入，减少幻觉
+# 更新时机：每次环境变更后（安装/卸载扩展、架构调整等）
+
+## 运行环境
+- 平台: Windows 11 (x64)
+- Python: 3.12.13 (uv 管理)
+- 浏览器: Chrome (系统默认)
+
+## 已安装组件
+- browser-agent: 浏览器桥接（油猴脚本 + shizuku_bridge.py + browser_manager.py）
+- 服务端: server/shizuku_bridge.py (端口 8123)
+- 油猴脚本: userscript/browser-agent-xbrowser.user.js
+- CLI: cli/browser_cli.sh (20+ 命令)
+
+## 核心通信架构
+- 浏览器控制: 油猴脚本 → shizuku_bridge.py (localhost:8123) → DOM 操作
+- 回答完成检测: 稳定长度检测（连续 2 次轮询长度不变 = 完成）
+- 命令队列: browser_commands[tabId] → 油猴轮询(2s) → 执行 → 回传
+
+## DeepSeek 已知特性
+- 网页版同一 tab 内保持对话历史 → 多轮追问有上下文
+- 会编造来源编号和技术细节 → 必须本地验证
+- 不输出 [STATUS: CONTINUE|DONE] 标记 → 用完整性检查替代
+- > 5 轮后早期上下文会被截断
+
+## 项目结构
+- 服务端: server/shizuku_bridge.py (纯标准库, ThreadingHTTPServer)
+- 浏览器管理: server/browser_manager.py (跨平台)
+- Shell 中继: server/shell_relay.py (白名单 + Token)
+- 配置: config/config.json
+- 脚本: scripts/ask-deepseek.sh, scripts/ask-deepseek-free.sh

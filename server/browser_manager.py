@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-browser_manager.py - 浏览器 Tab 管理 + 导航逻辑
+browser_manager.py - 浏览器 Tab 管理 + 导航逻辑（跨平台）
 """
+import os
 import subprocess
+import sys
+import shutil
 import threading
 import time
+import webbrowser
 from urllib.parse import urlparse
 
 from config import get_browser_config, get_feature_config
@@ -35,6 +39,43 @@ MAX_RESULTS = _feature_cfg["max_results"]
 MAX_LOGS = _feature_cfg["max_logs"]
 
 
+# ========== 平台检测 ==========
+
+def _is_android():
+    """检测是否为 Android/Termux 环境"""
+    if sys.platform != "linux":
+        return False
+    # Android 特征：存在 rish 或 /system/bin/adb
+    return shutil.which("rish") is not None or os.path.exists("/system/bin/adb")
+
+
+def _desktop_browser_cmd():
+    """返回桌面端浏览器启动命令，或 None 使用 webbrowser 回退"""
+    if sys.platform == "win32":
+        # Windows: 尝试 Chrome
+        for path in [
+            os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+            os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+        ]:
+            if os.path.isfile(path):
+                return path
+        return None
+    elif sys.platform == "darwin":
+        # macOS: Chrome
+        chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        if os.path.isfile(chrome):
+            return chrome
+        return None
+    else:
+        # Linux: 尝试常见浏览器
+        for name in ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"]:
+            path = shutil.which(name)
+            if path:
+                return path
+        return None
+
+
 # ========== Tab 管理 ==========
 
 def send_cmd(tab_id, cmd_data):
@@ -43,7 +84,7 @@ def send_cmd(tab_id, cmd_data):
     with browser_lock:
         cmd_id_counter += 1
         cmd_id = cmd_id_counter
-        cmd = {"id": cmd_id, "tabId": tab_id, **cmd_data}
+        cmd = {"id": cmd_id, **cmd_data}
         if tab_id not in browser_commands:
             browser_commands[tab_id] = []
         browser_commands[tab_id].append(cmd)
@@ -68,15 +109,11 @@ def find_tab_on_domain(domain):
     with browser_lock:
         best_tab = None
         best_time = 0
-        now = time.time()
-        for tid, info in browser_tabs.items():
-            # 跳过超过 60 秒没有心跳的 tab（可能已关闭或脚本崩溃）
-            updated_at = info.get("updated_at", 0)
-            if now - updated_at > 60:
-                continue
-            if domain in info.get("url", "") and updated_at > best_time:
-                best_tab = tid
-                best_time = updated_at
+        for tab_id, tab in browser_tabs.items():
+            # 子域名兼容：doubao.com 匹配 www.doubao.com
+            if domain in tab.get("url", "") and tab.get("updated_at", 0) > best_time:
+                best_tab = tab_id
+                best_time = tab["updated_at"]
         return best_tab
 
 
@@ -91,28 +128,40 @@ def find_most_recent_tab():
 def ping_tab(tab_id, timeout=5):
     """Ping 指定 tab，返回是否响应"""
     cmd_id = send_cmd(tab_id, {"action": "ping"})
-    result = wait_for_cmd_result(cmd_id, timeout=timeout)
+    result = wait_for_cmd_result(cmd_id, timeout)
     return result is not None and result.get("ok", False)
 
 
 # ========== 浏览器启动与导航 ==========
 
-def launch_browser_via_adb(url):
-    """通过 ADB 启动浏览器打开 URL"""
+def launch_browser(url):
+    """启动浏览器打开 URL（跨平台）"""
     if browser_launching.is_set():
         return False, "已有启动操作进行中"
     browser_launching.set()
     try:
-        result = subprocess.run(
-            ["rish", "-c",
-             f"am start -n {BROWSER_PACKAGE}/{BROWSER_ACTIVITY} -a android.intent.action.VIEW -d '{url}'"],
-            capture_output=True, text=True, timeout=15
-        )
-        if result.returncode != 0:
-            return False, result.stderr[:200] if result.stderr else "am start 失败"
-        return True, "ok"
+        if _is_android():
+            # Android: 通过 rish/Shizuku 启动 XBrowser
+            result = subprocess.run(
+                ["rish", "-c",
+                 f"am start -n {BROWSER_PACKAGE}/{BROWSER_ACTIVITY} -a android.intent.action.VIEW -d '{url}'"],
+                capture_output=True, text=True, timeout=15
+            )
+            if result.returncode != 0:
+                return False, result.stderr[:200] if result.stderr else "am start 失败"
+            return True, "ok"
+
+        # 桌面端：尝试启动指定浏览器，否则回退系统默认
+        browser_cmd = _desktop_browser_cmd()
+        if browser_cmd:
+            subprocess.Popen([browser_cmd, url],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return True, f"launched {os.path.basename(browser_cmd)}"
+        # 回退：系统默认浏览器
+        webbrowser.open(url)
+        return True, "opened with default browser"
     except subprocess.TimeoutExpired:
-        return False, "am start 超时"
+        return False, "启动超时"
     except Exception as e:
         return False, str(e)
     finally:
@@ -171,9 +220,10 @@ def ensure_on_page(url, timeout=30):
     with browser_lock:
         has_tabs = bool(browser_tabs)
     if not has_tabs:
-        ok, msg = launch_browser_via_adb(url)
+        ok, msg = launch_browser(url)
         if not ok:
             return {"error": f"启动浏览器失败: {msg}"}, 500
+
         # 等待 tab 注册
         start = time.time()
         while time.time() - start < timeout:
@@ -209,9 +259,10 @@ def add_result(data):
         browser_results.append(data)
         if len(browser_results) > MAX_RESULTS:
             browser_results.pop(0)
-        waiter = result_waiters.get(data.get("id"))
+        cmd_id = data.get("id")
+        waiter = result_waiters.get(cmd_id)
         if waiter:
-            result_cache[data.get("id")] = data
+            result_cache[cmd_id] = data
             waiter.set()
 
 
@@ -239,10 +290,10 @@ def get_tabs_state():
     """获取所有 tab 状态"""
     with browser_lock:
         tabs = {}
-        for tid, info in browser_tabs.items():
-            tabs[tid] = {
-                "url": info.get("url", ""),
-                "updated_at": info.get("updated_at", 0),
-                "last_heartbeat": info.get("heartbeat", {}),
+        for tab_id, tab in browser_tabs.items():
+            tabs[tab_id] = {
+                "url": tab.get("url", ""),
+                "updated_at": tab.get("updated_at", 0),
+                "heartbeat": tab.get("heartbeat", {})
             }
         return tabs

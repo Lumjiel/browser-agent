@@ -94,9 +94,13 @@ make health
 ./cli/browser_cli.sh state
 
 # 3. AI 问答测试
-python3 cli/ai_ask.py "你好" -a doubao
+bash scripts/ask-deepseek-free.sh --free "你好"
 
-# 4. 运行测试套件
+# 4. 带文件上传测试
+echo "测试文件内容" > /tmp/test-upload.txt
+bash scripts/ask-deepseek-free.sh --free "分析这个文件" --file /tmp/test-upload.txt
+
+# 5. 运行测试套件
 make test
 ```
 
