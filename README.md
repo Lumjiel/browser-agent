@@ -2,18 +2,18 @@
 
 **HTTP → 油猴脚本 → 浏览器 DOM**，零外部依赖，纯标准库实现。
 
-*Android/Termux + XBrowser + Shizuku · AI Agent 的浏览器手和眼*
+*跨平台：Android/Termux + Windows · AI Agent 的浏览器手和眼*
 
 [![CI](https://github.com/Lumjiel/browser-agent/workflows/CI/badge.svg)](https://github.com/Lumjiel/browser-agent/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-[快速开始](#-quick-start) · [API 接口](#-api-接口) · [CLI 命令](#-cli-命令) · [架构](#-架构) · [配置](#-配置)
+[快速开始](#-quick-start) · [API 接口](#-api-接口) · [CLI 命令](#-cli-命令) · [DeepSeek 讨论](#-deepseek-讨论) · [架构](#-架构) · [配置](#-配置)
 
 ---
 
 ## 😤 问题
 
-你的 AI agent 需要操作浏览器：查资料、填表单、抓数据。
+你的 AI Agent 需要操作浏览器：查资料、填表单、抓数据。
 
 | 方案 | 问题 |
 |------|------|
@@ -21,13 +21,13 @@
 | js_shooters（纯 fetch） | 只能抓静态页面，无法操作 DOM |
 | 手动复制粘贴 | 慢、脆、不能自动化 |
 
-**你需要一个跑在手机上的轻量桥接层，让任何 HTTP 客户端都能控制浏览器。**
+**你需要一个轻量桥接层，让任何 HTTP 客户端都能控制浏览器。**
 
 ---
 
 ## ✅ 方案
 
-Browser Agent 在手机上启动一个 HTTP 服务，通过油猴脚本桥接到浏览器 DOM：
+Browser Agent 启动一个 HTTP 服务，通过油猴脚本桥接到浏览器 DOM：
 
 ```
 你的脚本/curl/AI 工具
@@ -40,7 +40,7 @@ Browser Agent 在手机上启动一个 HTTP 服务，通过油猴脚本桥接到
         │
         ▼ HTTP 轮询（每 2s）
 ┌─────────────────────┐
-│  油猴脚本           │  ← XBrowser 中运行
+│  油猴脚本           │  ← XBrowser/Chrome 中运行
 │  (浏览器内)         │
 └─────────────────────┘
         │
@@ -48,21 +48,45 @@ Browser Agent 在手机上启动一个 HTTP 服务，通过油猴脚本桥接到
    目标网页
 ```
 
-**特点**：服务端零依赖（纯 Python 标准库），油猴脚本 fetch 优先（兼容 XBrowser），Shell 命令白名单 + Token 鉴权。
+**特点**：
+- 服务端零依赖（纯 Python 标准库）
+- 跨平台：Android/Termux + Windows
+- 油猴脚本 fetch 优先（兼容 XBrowser/Chrome）
+- Shell 命令白名单 + Token 鉴权 + 注入检测
 
 ---
 
 ## 🚀 Quick Start
 
+### Windows
+
 ```bash
-# 1. 克隆 + 启动服务
+# 1. 克隆
 git clone https://github.com/Lumjiel/browser-agent
 cd browser-agent
-python3 server/shizuku_bridge.py
-# ✅ Shizuku Bridge 已启动: http://127.0.0.1:8123
 
-# 2. 验证
-curl -s http://127.0.0.1:8123/api/health | python3 -m json.tool
+# 2. 启动服务
+bash start-bridge.sh start
+# ✅ 桥接服务已启动: http://127.0.0.1:8123
+
+# 3. 安装油猴脚本
+# Chrome → Tampermonkey → 新建 → 粘贴 userscript/browser-agent-xbrowser.user.js
+
+# 4. 控制浏览器
+curl -s -X POST http://127.0.0.1:8123/api/browser/interactive \
+  -H "Content-Type: application/json" \
+  -d '{"action":"navigate","url":"https://example.com"}'
+```
+
+### Android/Termux
+
+```bash
+# 1. 克隆
+git clone https://github.com/Lumjiel/browser-agent
+cd browser-agent
+
+# 2. 启动服务
+python3 server/shizuku_bridge.py
 
 # 3. 安装油猴脚本
 # XBrowser → 油猴管理 → 新建 → 粘贴 userscript/browser-agent-xbrowser.user.js
@@ -72,8 +96,6 @@ curl -s -X POST http://127.0.0.1:8123/api/browser/interactive \
   -H "Content-Type: application/json" \
   -d '{"action":"navigate","url":"https://example.com"}'
 ```
-
-> **5 秒出结果**：服务启动后立即可以发请求，无需配置。
 
 ---
 
@@ -99,7 +121,7 @@ curl -s -X POST http://127.0.0.1:8123/api/browser/interactive \
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| POST | `/api/shell` | 执行 Shell 命令（白名单 + Token） |
+| POST | `/api/shell` | 执行 Shell 命令（白名单 + Token + 注入检测） |
 | GET  | `/api/health` | 健康检查 |
 
 ### 同步 vs 异步
@@ -113,7 +135,7 @@ curl -s -X POST http://127.0.0.1:8123/api/browser/interactive \
 
 ## 💻 CLI 命令
 
-`cli/browser_cli.sh` 封装了 20+ 常用操作：
+### browser_cli.sh
 
 ```bash
 # 基础
@@ -136,11 +158,60 @@ curl -s -X POST http://127.0.0.1:8123/api/browser/interactive \
 
 环境变量：`BRIDGE_URL`（默认 `http://127.0.0.1:8123`）、`BRIDGE_TAB`（指定 tab）。
 
+### browser-agent.sh
+
+```bash
+bash browser-agent.sh state                # 获取页面状态
+bash browser-agent.sh click "文本"          # 点击按钮
+bash browser-agent.sh input "选择器" "文本"  # 输入文字
+bash browser-agent.sh text                 # 获取页面文本
+bash browser-agent.sh eval "JS代码"        # 执行 JS
+bash browser-agent.sh wait "文本"          # 等待文本出现
+```
+
+---
+
+## 🤖 DeepSeek 讨论
+
+内置 DeepSeek 自由讨论调度器，支持多轮对话、目标驱动、文件上传。
+
+```bash
+# 纯提问
+bash scripts/ask-deepseek-free.sh "问题"
+
+# 带文件上传（支持多文件）
+bash scripts/ask-deepseek-free.sh "分析这个文件" --file /mnt/e/test.txt
+
+# 自动扫描本地文件
+bash scripts/ask-deepseek-free.sh --context "关键词" "问题"
+
+# 多轮追问
+bash scripts/ask-deepseek-free.sh --round 2 "追问内容"
+
+# 切换目标
+bash scripts/ask-deepseek-free.sh --goal "新目标"
+
+# 注册死路
+bash scripts/ask-deepseek-free.sh --dead "被否决的方向"
+
+# 自由讨论（忽略目标）
+bash scripts/ask-deepseek-free.sh --free "问题"
+```
+
+**特性**：
+- 自动注入 `goal.txt` 作为讨论目标
+- 自动注入 `dead_ends.txt` 排除已否决方向
+- 第 1 轮注入 `facts.txt` 减少幻觉
+- 文件上传：base64 + DataTransfer 注入，支持多文件，自动截断
+- 复用已有 tab 保持多轮对话上下文
+
+详见 [`agents/deepseek/SKILL.md`](agents/deepseek/SKILL.md)
+
 ---
 
 ## 🔧 Shell 命令中继
 
-通过 Shizuku 执行 ADB shell 命令，**白名单 + Token 双保险**：
+通过 Shizuku/桌面 Shell 执行命令，**白名单 + Token + 注入检测** 三重安全：
 
 ```bash
 curl -s -X POST http://127.0.0.1:8123/api/shell \
@@ -149,13 +220,18 @@ curl -s -X POST http://127.0.0.1:8123/api/shell \
   -d '{"cmd": "input tap 500 800"}'
 ```
 
-**白名单前缀**（`config.json` 中可配置）：
+**白名单前缀**：
 
 | 类型 | 允许的命令前缀 |
 |------|---------------|
 | 输入模拟 | `input tap`、`input swipe`、`input text`、`input keyevent` |
-| 设备信息 | `dumpsys`、`uiautomator dump`、`screencap` |
-| 包管理 | `pm list`、`cmd package` |
+| UI 获取 | `uiautomator dump`、`screencap` |
+| 应用管理 | `am start`、`am force-stop`、`am broadcast` |
+| 设备信息 | `dumpsys`、`pm list`、`cmd package` |
+| 文件读取 | `cat `、`head `、`tail `、`ls `、`stat `、`wc ` |
+| 工具 | `echo `、`grep `、`pidof`、`which` |
+
+**注入检测**：自动拒绝包含 `;`、`&&`、`||`、`\|`、`` ` ``、`$()`、换行 的命令。
 
 ---
 
@@ -173,7 +249,7 @@ curl -s -X POST http://127.0.0.1:8123/api/shell \
 │  ├── 浏览器 API：ensure / navigate / interactive  │
 │  ├── 命令队列：command → commands → result        │
 │  ├── Tab 管理：state / heartbeat                  │
-│  └── Shell API：白名单 + Token 鉴权               │
+│  └── Shell API：白名单 + Token + 注入检测        │
 └─────────────────────────────────────────────────┘
                       │ HTTP 轮询（每 2s）
                       ▼
@@ -190,8 +266,8 @@ curl -s -X POST http://127.0.0.1:8123/api/shell \
 | 文件 | 职责 |
 |------|------|
 | `server/shizuku_bridge.py` | HTTP 路由 + 入口 |
-| `server/browser_manager.py` | Tab 管理 + 导航 + 命令队列 |
-| `server/shell_relay.py` | Shell 白名单校验 + 执行 |
+| `server/browser_manager.py` | Tab 管理 + 导航 + 命令队列（跨平台） |
+| `server/shell_relay.py` | Shell 白名单校验 + 执行（跨平台） |
 | `server/config.py` | 配置加载 |
 
 ---
@@ -208,8 +284,8 @@ curl -s -X POST http://127.0.0.1:8123/api/shell \
     "token": "MY_SECRET_123456"
   },
   "browser": {
-    "package": "com.mmbox.xbrowser",
-    "activity": ".BrowserActivity"
+    "package": "",
+    "activity": ""
   },
   "features": {
     "shell_whitelist": true,
@@ -226,7 +302,7 @@ curl -s -X POST http://127.0.0.1:8123/api/shell \
 | `server.host` | `127.0.0.1` | 监听地址（不建议暴露公网） |
 | `server.port` | `8123` | 监听端口 |
 | `server.token` | — | Shell API 的 Bearer Token |
-| `browser.package` | `com.mmbox.xbrowser` | 目标浏览器包名 |
+| `browser.package` | — | Android 浏览器包名（留空则桌面端） |
 | `features.shell_whitelist` | `true` | Shell 白名单开关 |
 
 ---
@@ -291,8 +367,6 @@ make help
 ```
 
 **测试覆盖**：服务端单元测试（pytest）+ CLI 集成测试（bash）。
-
----
 
 ---
 
