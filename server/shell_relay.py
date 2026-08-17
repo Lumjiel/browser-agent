@@ -34,16 +34,20 @@ DESKTOP_ALLOWED_PREFIXES = (
     "dir ", "type ", "find ", "more ", "tree ",
 )
 
+# 注入检测：拒绝包含命令链接/替换的命令
+_INJECTION_CHARS = (';', '&&', '||', '|', '`', '$(', '\n', '\r')
 
-def _is_android():
-    """检测是否为 Android/Termux 环境"""
-    if sys.platform != "linux":
-        return False
-    return shutil.which("rish") is not None
+
+def has_injection(cmd):
+    """检测命令是否包含注入字符"""
+    return any(c in cmd for c in _INJECTION_CHARS)
 
 
 def is_command_allowed(cmd):
-    """检查命令是否在白名单中"""
+    """检查命令是否在白名单中（含注入检测）"""
+    # 先检查注入
+    if has_injection(cmd):
+        return False
     # 检查 Android 白名单
     if any(cmd.startswith(p) for p in ALLOWED_PREFIXES):
         return True
@@ -51,8 +55,6 @@ def is_command_allowed(cmd):
     if any(cmd.startswith(p) for p in DESKTOP_ALLOWED_PREFIXES):
         return True
     return False
-
-
 def execute_shell(cmd, timeout=15):
     """执行 shell 命令并返回结果（跨平台）"""
     try:
