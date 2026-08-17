@@ -235,33 +235,41 @@ curl -s -X POST http://127.0.0.1:8123/api/shell \
 
 ```
 browser-agent/
-├── server/
-│   ├── shizuku_bridge.py       # HTTP 主入口（路由分发）
-│   ├── browser_manager.py      # Tab 管理 + 导航 + 命令队列
-│   ├── shell_relay.py          # Shell 白名单校验 + 执行
-│   ├── config.py               # 配置加载
-│   ├── shizuku_bridge.service  # systemd 服务文件
-│   └── requirements.txt        # 开发依赖（仅测试用）
-├── userscript/
-│   ├── browser-agent-xbrowser.user.js  # XBrowser 油猴脚本
-│   └── console.user.js                 # ADB Shell 控制台
-├── cli/
-│   └── browser_cli.sh          # 浏览器 CLI（20+ 命令）
+├── agents/
+│   └── deepseek/
+│       ├── SKILL.md                  # DeepSeek 讨论调度器文档 (v3.1.1)
+│       ├── meta.json               # Skill 元数据
+│       ├── goal.txt                # 只读目标区（自动注入 prompt）
+│       ├── facts.txt               # 本地环境事实（减少幻觉）
+│       ├── dead_ends.txt          # 死路注册表（排除约束）
+│       ├── test_health.sh          # 健康检查脚本
+│       └── strategies/             # 策略模板（adversarial_review 等）
 ├── scripts/
-│   ├── ask-deepseek.sh         # DeepSeek 问答脚本
-│   └── ask-deepseek-free.sh    # DeepSeek 免费版脚本
+│   ├── ask-deepseek-free.sh      # DeepSeek 免费版脚本（v3.1.1 · 主脚本）
+│   └── ask-deepseek.sh           # DeepSeek 问答脚本（旧版）
+├── cli/
+│   └── browser_cli.sh            # 浏览器 CLI（20+ 命令）
+├── server/
+│   ├── shizuku_bridge.py         # HTTP 主入口（纯标准库）
+│   ├── browser_manager.py        # Tab 管理（跨平台：Android + Windows）
+│   ├── shell_relay.py            # Shell 命令中继（白名单 + Token）
+│   ├── config.py                 # 配置加载
+│   └── requirements.txt          # 开发依赖
+├── userscript/
+│   ├── browser-agent-xbrowser.user.js  # XBrowser/Chrome 油猴脚本
+│   └── console.user.js                 # ADB Shell 控制台
 ├── config/
-│   └── config.example.json     # 配置示例
+│   └── config.example.json       # 配置示例
 ├── docs/
-│   ├── api.md                  # 完整 API 文档
-│   ├── setup.md                # 安装配置指南
-│   └── architecture.md         # 架构详解
+│   ├── api.md                    # 完整 API 文档
+│   ├── setup.md                  # 安装配置指南
+│   └── architecture.md           # 架构详解
 ├── tests/
-│   ├── test_bridge.py          # 服务端单元测试
-│   └── test_cli.sh             # CLI 集成测试
-├── Makefile                    # make start / stop / test / lint
-├── CHANGELOG.md                # 变更日志
-└── LICENSE                     # MIT
+│   ├── test_bridge.py            # 服务端单元测试
+│   └── test_cli.sh               # CLI 集成测试
+├── Makefile                      # make start / stop / test / lint
+├── CHANGELOG.md                  # 变更日志
+└── LICENSE                       # MIT
 ```
 
 ---

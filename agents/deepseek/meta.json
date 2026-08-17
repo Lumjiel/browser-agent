@@ -1,0 +1,10 @@
+{
+  "name": "ask-deepseek",
+  "version": "3.1.1",
+  "type": "browser-automation",
+  "status": "active",
+  "created_at": "2026-08-17",
+  "updated_at": "2026-08-17",
+  "triggers": "问 DeepSeek, 讨论方案, 架构讨论, 技术方案, DeepSeek 分析, 方案评审, brainstorm",
+  "tags": ["ai-discussion", "deepseek", "browser-bridge", "multi-round", "file-upload"]
+}

@@ -35,7 +35,7 @@ from config import get_server_config
 from browser_manager import (
     browser_tabs, browser_commands, browser_results, browser_logs,
     send_cmd, wait_for_cmd_result, find_tab_on_domain, find_most_recent_tab,
-    ping_tab, launch_browser_via_adb, navigate_and_wait, ensure_on_page,
+    ping_tab, launch_browser, navigate_and_wait, ensure_on_page,
     add_result, add_log, get_results, get_logs, get_tabs_state,
     result_waiters, result_cache, browser_lock,
     MAX_RESULTS, MAX_LOGS
@@ -162,7 +162,14 @@ class ShizukuHandler(BaseHTTPRequestHandler):
             action = data.get("action", "").strip()
             if not action:
                 return self._send_json({"error": "缺少action"}, 400)
-            tab_id = data.get("tabId", "default")
+            tab_id = data.get("tabId")
+            # Auto-resolve: 未指定或 default 时选最近活跃的 tab
+            if not tab_id or tab_id == "default":
+                recent = browser_manager.find_most_recent_tab()
+                if recent:
+                    tab_id = recent
+                else:
+                    tab_id = "default"
             timeout = data.get("timeout", 30)
             with browser_lock:
                 browser_manager.cmd_id_counter += 1
@@ -176,7 +183,6 @@ class ShizukuHandler(BaseHTTPRequestHandler):
                 browser_commands[tab_id].append(cmd)
                 event = threading.Event()
                 result_waiters[cmd_id] = event
-
             if event.wait(timeout=timeout):
                 result = result_cache.pop(cmd_id, None)
                 self._send_json(result or {"error": "result lost"})
@@ -185,6 +191,7 @@ class ShizukuHandler(BaseHTTPRequestHandler):
             result_waiters.pop(cmd_id, None)
             result_cache.pop(cmd_id, None)
             return
+
 
         if parsed_path == "/api/browser/command":
             data = self._read_json_body()

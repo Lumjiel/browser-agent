@@ -5,25 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [3.1.1] - 2026-08-17
 
 ### Added
-- 新增 `cli/browser_cli.sh` — 浏览器控制 CLI 工具（20+ 命令）
-- 新增 `cli/ai_client.py` — 多 AI 问答客户端（支持豆包/DeepSeek/千问）
-- 新增 `userscript/console.user.js` — ADB Shell 控制台
-- 新增 `config/config.example.json` — 配置示例
-- 新增 `docs/setup.md` — 安装配置指南
-- 新增 `docs/api.md` — 完整 API 文档
-- 新增 `docs/architecture.md` — 架构说明文档
-- 新增 `server/requirements.txt` — 开发依赖声明
-- 新增 `Makefile` — 一键操作
-- 新增 `.github/workflows/ci.yml` — CI 自动化
-- 新增 `tests/` — 单元测试和集成测试框架
-- 新增 `server/config.py` — 配置加载模块
-- 新增 `server/browser_manager.py` — Tab 管理 + 导航逻辑
-- 新增 `server/shell_relay.py` — Shell 命令中继 + 白名单
+- 新增 `agents/deepseek/` 目录：完整的 DeepSeek 讨论调度器 skill
+- 新增 `scripts/ask-deepseek-free.sh` v3.1.1：多轮对话、目标驱动、死路注册、事实注入
+- 新增文件上传功能：base64 + DataTransfer 注入，支持多文件，自动截断
+- 新增 `--context` 模式：自动扫描本地文件上传
+- 新增 `--goal`/`--dead`/`--round`/`--free` 参数
+- 新增策略系统：`agents/deepseek/strategies/` 目录
 
 ### Changed
+- `server/browser_manager.py`：跨平台支持（Android + Windows）
+- `server/shell_relay.py`：跨平台支持，桌面端直接执行
+- `server/shizuku_bridge.py`：修复 interactive 自动解析 tabId
+- 发送按钮选择器修复：改为动态查找最后一个 primary circle 按钮
+
+### Fixed
+- 修复 `interactive` 不传 tabId 超时问题
+- 修复文件上传路径：Windows 使用 `/mnt/` 前缀
+- 修复客户端检测：使用 `/api/browser/state` 替代 `/api/clients`
+
+ ## [Unreleased]
 - 项目结构重组：按 server/userscript/cli/config/docs 分类
 - 重命名脚本为通用名称（doubao_ask.py → ai_ask.py）
 - 更新 README.md 反映本地化架构

@@ -5,8 +5,8 @@
     "token": "MY_SECRET_123456"
   },
   "browser": {
-    "package": "com.mmbox.xbrowser",
-    "activity": ".BrowserActivity"
+    "package": "",
+    "activity": ""
   },
   "features": {
     "shell_whitelist": true,

@@ -59,6 +59,7 @@ Authorization: Bearer YOUR_TOKEN
 | `assertText` | `text` | 断言文本存在 |
 | `assertSelector` | `selector` | 断言元素存在 |
 | `getConsoleLog` | `count` | 获取控制台日志 |
+| `upload` | `files` | 上传文件（base64 + DataTransfer） |
 | `ping` | - | 心跳检测 |
 
 ### POST /api/browser/command

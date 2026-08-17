@@ -1,131 +1,140 @@
 #!/bin/bash
-# ask-deepseek-free.sh — DeepSeek 自由讨论（支持 --context 自动扫描本地文档）
+# ask-deepseek-free.sh — DeepSeek 自由讨论调度器 v3.1.1
+# 调用链: 本脚本 → bridge API → 油猴脚本 → DeepSeek
+#
 # 用法:
-#   bash ask-deepseek-free.sh "问题"
-#   bash ask-deepseek-free.sh "问题" [goal_file] [timeout] [--file a] [--file b]
-#   bash ask-deepseek-free.sh --context "关键词" "问题" [--dir ~/projects] [--file c]
+#   bash ask-deepseek-free.sh "<问题>"
+#   bash ask-deepseek-free.sh "<问题>" [goal_file] [timeout]
+#   bash ask-deepseek-free.sh "<问题>" --file a --file b
+#   bash ask-deepseek-free.sh --context "关键词" "<问题>"
+#   bash ask-deepseek-free.sh --round 2 "<问题>"
+#   bash ask-deepseek-free.sh --goal "新目标"
+#   bash ask-deepseek-free.sh --dead "方向"
+#   bash ask-deepseek-free.sh --free "<问题>"
 
 set -euo pipefail
 
 BRIDGE="http://127.0.0.1:8123"
 MAX_AUTO_FILES=10
-MAX_FILE_SIZE=$((1 * 1024 * 1024))  # 1MB
-SCAN_DIRS=("$HOME/projects" "$HOME/tools" "$HOME/.pi/agent/skills")
+MAX_FILE_SIZE=$((1 * 1024 * 1024))
+SCAN_DIRS=("$HOME/projects" "$HOME/tools" "$HOME/.agents/skills")
 
-# === 解析参数 ===
+AGENT_DIR="$HOME/projects/active/browser-agent/agents/deepseek"
+GOAL_FILE="$AGENT_DIR/goal.txt"
+DEAD_FILE="$AGENT_DIR/dead_ends.txt"
+FACTS_FILE="$AGENT_DIR/facts.txt"
+
 CONTEXT_KEYWORD=""
 AUTO_SCAN=false
 QUESTION=""
-GOAL_FILE="$HOME/projects/active/browser-agent/agents/deepseek/goal.txt"
 TIMEOUT="120"
 MANUAL_FILES=()
+ROUND=1
+FREE_MODE=false
+NEW_GOAL=""
+NEW_DEAD=""
 
-# 先提取 --context 和 --dir
 _REMAINING_ARGS=()
 while [[ $# -gt 0 ]]; do
     case "${1:-}" in
-        --context)
-            AUTO_SCAN=true
-            CONTEXT_KEYWORD="${2:-}"
-            shift 2
-            ;;
-        --dir)
-            SCAN_DIRS+=("${2:-}")
-            shift 2
-            ;;
-        --file)
-            MANUAL_FILES+=("${2:-}")
-            shift 2
-            ;;
-        *)
-            _REMAINING_ARGS+=("${1:-}")
-            shift
-            ;;
+        --context) AUTO_SCAN=true; CONTEXT_KEYWORD="${2:-}"; shift 2 ;;
+        --dir) SCAN_DIRS+=("${2:-}"); shift 2 ;;
+        --file) MANUAL_FILES+=("${2:-}"); shift 2 ;;
+        --round) ROUND="${2:-}"; shift 2 ;;
+        --goal) NEW_GOAL="${2:-}"; shift 2 ;;
+        --dead) NEW_DEAD="${2:-}"; shift 2 ;;
+        --free) FREE_MODE=true; shift ;;
+        *) _REMAINING_ARGS+=("${1:-}"); shift ;;
     esac
 done
 
-# 剩余参数: question [goal_file] [timeout]
 QUESTION="${_REMAINING_ARGS[0]:-}"
-GOAL_FILE="${_REMAINING_ARGS[1]:-$GOAL_FILE}"
-TIMEOUT="${_REMAINING_ARGS[2]:-$TIMEOUT}"
+TIMEOUT="${_REMAINING_ARGS[1]:-$TIMEOUT}"
+
+if [[ -n "$NEW_GOAL" ]]; then
+    mkdir -p "$AGENT_DIR"
+    cat > "$GOAL_FILE" << GOALEOF
+# goal.txt — 只读目标区
+goal: "$NEW_GOAL"
+constraints:
+  - "保持跨平台兼容"
+GOALEOF
+    echo "[✓] 目标已更新: $NEW_GOAL"
+    [[ -z "$QUESTION" ]] && exit 0
+fi
+
+if [[ -n "$NEW_DEAD" ]]; then
+    mkdir -p "$AGENT_DIR"
+    echo "$(date +%Y-%m-%d): \"$NEW_DEAD\" — 被否决" >> "$DEAD_FILE"
+    echo "[✓] 死路已注册: $NEW_DEAD"
+    [[ -z "$QUESTION" ]] && exit 0
+fi
 
 if [[ -z "$QUESTION" ]]; then
-    echo "用法: bash ask-deepseek-free.sh [--context <关键词>] [--file <path>] [--dir <path>] \"问题\" [goal_file] [timeout]"
+    echo "用法: bash ask-deepseek-free.sh [--context <关键词>] [--file <path>] [--round N] [--goal <目标>] [--dead <方向>] [--free] \"问题\" [timeout]"
     exit 1
 fi
 
-# === 自动扫描本地文件 ===
 AUTO_FILES=()
-
 if [[ "$AUTO_SCAN" == true ]]; then
     echo "[*] 自动扫描模式，关键词: ${CONTEXT_KEYWORD:-无}"
-    
     _candidates=()
     for dir in "${SCAN_DIRS[@]}"; do
         [[ -d "$dir" ]] || continue
         while IFS= read -r -d '' file; do
             _candidates+=("$file")
-        done < <(find "$dir" -type f \
-            \( -name "README.md" -o -name "*.txt" -o -name "*.json" \
-            -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" \
-            -o -name "*.gradle" -o -name "*.properties" -o -name "*.md" \) \
-            ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/__pycache__/*" \
-            ! -name "*.so" ! -name "*.jar" ! -name "*.class" ! -name "*.png" ! -name "*.jpg" \
-            ! -name "*.pyc" 2>/dev/null | sort -u)
+        done < <(find "$dir" -type f \( -name "README.md" -o -name "*.txt" -o -name "*.json" -o -name "*.yaml" -o -name "*.yml" -o -name "*.toml" -o -name "*.gradle" -o -name "*.properties" -o -name "*.md" \) ! -path "*/node_modules/*" ! -path "*/.git/*" ! -path "*/__pycache__/*" ! -name "*.so" ! -name "*.jar" ! -name "*.class" ! -name "*.png" ! -name "*.jpg" ! -name "*.pyc" 2>/dev/null | sort -u)
     done
-    
     _filtered=()
     if [[ -n "$CONTEXT_KEYWORD" ]]; then
         _kw_lower="${CONTEXT_KEYWORD,,}"
         for f in "${_candidates[@]}"; do
             _fname=$(basename "$f")
             _fname_lower="${_fname,,}"
-            if [[ "$_fname_lower" == *"$_kw_lower"* ]] || [[ "${f,,}" == *"$_kw_lower"* ]]; then
-                _filtered+=("$f")
-            fi
+            [[ "$_fname_lower" == *"$_kw_lower"* || "${f,,}" == *"$_kw_lower"* ]] && _filtered+=("$f")
         done
     else
         _filtered=("${_candidates[@]}")
     fi
-    
-    # 排序: README 优先
     _sorted=()
-    for f in "${_filtered[@]}"; do
-        [[ "$(basename "$f")" == "README.md" ]] && _sorted+=("$f")
-    done
-    for f in "${_filtered[@]}"; do
-        [[ "$(basename "$f")" != "README.md" ]] && _sorted+=("$f")
-    done
-    
+    for f in "${_filtered[@]}"; do [[ "$(basename "$f")" == "README.md" ]] && _sorted+=("$f"); done
+    for f in "${_filtered[@]}"; do [[ "$(basename "$f")" != "README.md" ]] && _sorted+=("$f"); done
     _count=0
     for f in "${_sorted[@]}"; do
         [[ $_count -ge $MAX_AUTO_FILES ]] && break
         _size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
-        if [[ "$_size" -gt 0 ]]; then
-            AUTO_FILES+=("$f")
-            ((_count++))
-        fi
+        [[ "$_size" -gt 0 ]] && AUTO_FILES+=("$f") && ((_count++))
     done
-    
     echo "[*] 找到 ${#AUTO_FILES[@]} 个相关文件"
-    for f in "${AUTO_FILES[@]}"; do
-        _size=$(stat -c%s "$f" 2>/dev/null || stat -f%z "$f" 2>/dev/null || echo 0)
-        echo "    - $(basename "$f") ($_size B) [$f]"
-    done
 fi
 
-# 合并手动指定 + 自动扫描的文件
 ALL_FILES=("${MANUAL_FILES[@]}" "${AUTO_FILES[@]}")
 
-# === 读取目标上下文 ===
 CONTEXT=""
-if [[ -f "$GOAL_FILE" ]]; then
-    CONTEXT="## 当前讨论目标(只读参考)\n$(cat "$GOAL_FILE")\n\n---\n\n"
+if [[ "$FREE_MODE" == false ]] && [[ -f "$GOAL_FILE" ]]; then
+    GOAL_CONTENT=$(cat "$GOAL_FILE")
+    CONTEXT="## 当前讨论目标（只读参考）\n${GOAL_CONTENT}\n\n---\n\n"
 fi
+
+if [[ -f "$DEAD_FILE" ]]; then
+    DEAD_LINES=$(grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}:' "$DEAD_FILE" | tail -10)
+    if [[ -n "$DEAD_LINES" ]]; then
+        CONTEXT="${CONTEXT}## 已排除方向（不要再建议）\n"
+        while IFS= read -r line; do CONTEXT="${CONTEXT}${line}\n"; done <<< "$DEAD_LINES"
+        CONTEXT="${CONTEXT}\n---\n\n"
+    fi
+fi
+
+if [[ "$ROUND" -eq 1 ]] && [[ -f "$FACTS_FILE" ]]; then
+    FACTS_CONTENT=$(cat "$FACTS_FILE")
+    CONTEXT="${CONTEXT}## 本地环境事实（减少幻觉）\n${FACTS_CONTENT}\n\n---\n\n"
+fi
+
 MESSAGE="${CONTEXT}${QUESTION}"
 
-# ============ 主流程（单 Python 块完成） ============
 echo "========== DeepSeek 自由讨论 =========="
+echo "轮次: $ROUND | 超时: ${TIMEOUT}s | 文件: ${#ALL_FILES[@]}"
+echo "=========================================="
 
 export DS_TIMEOUT="$TIMEOUT"
 export DS_MESSAGE="$MESSAGE"
@@ -133,11 +142,7 @@ export DS_BRIDGE="$BRIDGE"
 export DS_HOME="$HOME"
 export DS_MAX_FILE_SIZE="$MAX_FILE_SIZE"
 
-if [[ ${#ALL_FILES[@]} -gt 0 ]]; then
-    export DS_UPLOADS="$(printf '%s\n' "${ALL_FILES[@]}")"
-else
-    export DS_UPLOADS=""
-fi
+[[ ${#ALL_FILES[@]} -gt 0 ]] && export DS_UPLOADS="$(printf '%s\n' "${ALL_FILES[@]}")" || export DS_UPLOADS=""
 
 python3 << 'PYEOF'
 import json, time, urllib.request, base64, os, sys, subprocess
@@ -170,23 +175,31 @@ def tab_id():
             return tid
     return None
 
-# === 1. 检查桥接 + 连接 ===
+# === 1. 检查桥接 + 启动 ===
 if req("/api/health", method="GET").get("status") != "ok":
     print("[*] 桥接未运行，启动中...", file=sys.stderr)
-    subprocess.run(["bash", f"{HOME}/projects/active/browser-agent/start-bridge.sh",
-                   "start"], capture_output=True)
-    time.sleep(3)
+    bridge_dir = os.path.join(HOME, "projects", "active", "browser-agent")
+    if not os.path.isdir(bridge_dir):
+        bridge_dir = os.path.dirname(os.path.abspath(__file__))
+    bridge_script = os.path.join(bridge_dir, "server", "shizuku_bridge.py")
+    if os.path.isfile(bridge_script):
+        subprocess.Popen(
+            [sys.executable, bridge_script],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            cwd=bridge_dir
+        )
+        time.sleep(3)
     if req("/api/health", method="GET").get("status") != "ok":
         print("[!] 桥接启动失败", file=sys.stderr)
         exit(1)
 
-clients = req("/api/clients", method="GET").get("count", 0)
-if clients == 0:
-    print("[!] 无浏览器客户端连接", file=sys.stderr)
+tabs = req("/api/browser/state", method="GET").get("tabs", {})
+if len(tabs) == 0:
+    print("[!] 无浏览器客户端连接（需要 Chrome + 油猴脚本打开网页）", file=sys.stderr)
     exit(1)
-print(f"[✓] 桥接正常，{clients} 个客户端", file=sys.stderr)
+print(f"[✓] 桥接正常，{len(tabs)} 个浏览器 tab", file=sys.stderr)
 
-# === 2. 获取 tab，复用同一会话 ===
+# === 2. 获取 tab ===
 tid = tab_id()
 if not tid:
     post("/api/browser/ensure", {"url": "https://chat.deepseek.com", "timeout": 15})
@@ -196,7 +209,7 @@ if not tid:
         print("[!] 无法打开 DeepSeek", file=sys.stderr)
         exit(1)
 
-# === 3. 文件上传（支持多文件 + 大文件截断） ===
+# === 3. 文件上传 ===
 if UPLOAD_FILES:
     files_data = []
     for fpath in UPLOAD_FILES:
@@ -205,7 +218,6 @@ if UPLOAD_FILES:
             continue
         size = os.path.getsize(fpath)
         if size > MAX_FILE_SIZE:
-            print(f"[!] 截断超大文件: {fpath} ({size}B > {MAX_FILE_SIZE}B)", file=sys.stderr)
             with open(fpath, "rb") as f:
                 content = f.read(MAX_FILE_SIZE)
             b64 = base64.b64encode(content).decode()
@@ -215,7 +227,6 @@ if UPLOAD_FILES:
             name = os.path.basename(fpath)
         files_data.append({"name": name, "b64": b64})
         print(f"[*] 上传: {name}", file=sys.stderr)
-    
     if files_data:
         files_json = json.dumps(files_data)
         js = f"""(function(){{
@@ -237,30 +248,35 @@ if UPLOAD_FILES:
         post("/api/browser/command", {"action": "eval", "tabId": tid, "code": js})
         time.sleep(3)
 
-# === 4. 发送 + 等待回答 ===
+# === 4. 输入问题 + 点击发送 ===
 print(f"[*] 发送问题 (timeout: {TIMEOUT}s)...", file=sys.stderr)
 print("==========================================")
 
+# 输入框
+INPUT_JS = '''document.querySelector('textarea[placeholder*="给 DeepSeek 发送消息"]')'''
+post("/api/browser/interactive", {"tabId": tid, "action": "eval",
+    "code": f"var el={INPUT_JS}; if(el){{el.focus(); el.value=''; el.dispatchEvent(new Event('input',{{bubbles:true}})); 'ok'}} else {{'no'}}"})
+
+# 输入文字
 post("/api/browser/interactive", {"tabId": tid, "action": "type",
     "selector": 'textarea[placeholder*="给 DeepSeek 发送消息"]', "text": MESSAGE})
-post("/api/browser/interactive", {"tabId": tid, "action": "click",
-    "selector": "div.ds-button--primary.ds-button--filled.ds-button--circle"})
 
-# 发送前：记录当前消息数量（验证新回答已渲染）
-COUNT_JS = """(function(){
-    var c=document.querySelector('.ds-virtual-list-visible-items');
-    return c?c.children.length:0;
-})()"""
-r = post("/api/browser/interactive", {"tabId": tid, "action": "eval", "code": COUNT_JS})
-old_count = r.get("result", {}).get("value", 0) if "result" in r else 0
-print(f"[*] 当前消息数: {old_count}", file=sys.stderr)
+# 点击发送（最后一个 primary circle 按钮）
+post("/api/browser/interactive", {"tabId": tid, "action": "eval",
+    "code": """(function(){
+        var btns = document.querySelectorAll('div.ds-button--primary.ds-button--filled.ds-button--circle');
+        if (btns.length > 0) {
+            btns[btns.length - 1].click();
+            return 'clicked send button';
+        }
+        return 'send button not found';
+    })()"""})
 
-# 提取器：取最后一条消息的完整内容（思考+回答）
+# === 5. 等待回答完成 ===
 ANS_JS = """(function(){
     var c=document.querySelector('.ds-virtual-list-visible-items');
     if(!c)return '';
     var last=c.lastElementChild;
-    // 确保是 AI 回答（含思考或最终回答），不是用户消息
     if(!last.querySelector('.ds-think-content') && !last.querySelector('.ds-assistant-message-main-content'))
         return '';
     var msg=last.querySelector('.ds-message');
@@ -285,7 +301,6 @@ while elapsed < TIMEOUT:
     if elapsed % 15 == 0:
         print(f"⏳ 生成中 ({elapsed}s, {cur}字)", file=sys.stderr)
 
-# 超时
 if prev > 0:
     r = post("/api/browser/interactive", {"tabId": tid, "action": "eval", "code": ANS_JS})
     text = r.get("result", {}).get("value", "") if "result" in r else ""
